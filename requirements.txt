@@ -1,0 +1,4 @@
+python-jose
+requests
+boto3
+Jinja2

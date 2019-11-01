@@ -1,0 +1,261 @@
+import os
+import time
+import hashlib
+import logging
+import traceback
+import urllib.parse
+from typing import Optional
+
+from jose import jwt
+
+from .utils import (
+    AccessDenied,
+    base64_without_padding,
+    get_cookies,
+    get_store,
+    put_store,
+    get_discovery_document,
+    check_state,
+    exchange_code_for_token,
+    exchange_token_for_roles,
+    redirect_to_web_console,
+    STORE_KEYS
+)
+from .config import CONFIG
+
+logger = logging.getLogger()
+logging.getLogger().setLevel(logging.INFO)
+logging.getLogger('boto3').propagate = False
+logging.getLogger('botocore').propagate = False
+logging.getLogger('urllib3').propagate = False
+
+
+# /pick_role
+def pick_role(cookie_header: str, role_arn: str) -> dict:
+    """API Gateway /pick_role endpoint which the user goes to when they've
+    selected an AWS IAM Role from the role picker web page
+
+    :param cookie_header: Content of the "Cookie" HTTP header
+    :param role_arn: The AWS IAM Role ARN selected from the role picker
+    :return: An AWS API Gateway output dictionary for proxy mode
+    """
+    global discovery_document
+    if 'discovery_document' not in globals():
+        logger.debug('Fetching discovery document')
+        discovery_document = get_discovery_document(CONFIG.discovery_url)
+
+    id_token = get_cookies(cookie_header, CONFIG.token_cookie_name)
+    logger.debug('role_arn is {} of type {}'.format(role_arn, type(role_arn)))
+    try:
+        # No need to set a TOKEN_COOKIE_NAME cookie as it's already been set
+        return redirect_to_web_console(
+            discovery_document['jwks'],
+            id_token,
+            role_arn)
+    except AccessDenied as e:
+        return {
+            'statusCode': 403,
+            'headers': {'Content-Type': 'text/html'},
+            'body': "Access denied : {}".format(e)}
+
+
+# /redirect_uri
+def login(state: str, code: str, cookie_header: str) -> dict:
+    """API Gateway /redirect_uri endpoint which the user is redirected to after
+    authenticating with the identity provider
+
+    :param state: "state" query parameter returned by the identity provider
+    :param code: "code" query parameter returned by the identity provider
+    :param cookie_header: HTTP header cookies sent by the user
+    :return: An AWS API Gateway output dictionary for proxy mode
+    """
+    global store, discovery_document
+    if 'store' not in globals():
+        store = get_store()
+    if 'discovery_document' not in globals():
+        logger.debug('Fetching discovery document')
+        discovery_document = get_discovery_document(CONFIG.discovery_url)
+
+    try:
+        if 'state' is None:
+            raise AccessDenied('"state" query parameter is missing"')
+        cookie_value = get_cookies(cookie_header, CONFIG.login_cookie_name)
+        store = check_state(
+            store,
+            state,
+            cookie_value
+        )
+        if 'code' is None:
+            raise AccessDenied('"code" query parameter is missing')
+        if ('code_verifier' not in store
+                or state not in store['code_verifier']):
+            raise AccessDenied(
+                '"state" provided does not match a known stored code_verifier')
+    except AccessDenied as e:
+        return {
+            'statusCode': 403,
+            'headers': {'Content-Type': 'text/html'},
+            'body': "Access denied : {}".format(e)}
+    token = exchange_code_for_token(
+        store,
+        discovery_document['token_endpoint'],
+        code,
+        state)
+    id_token_dict = jwt.decode(
+        token=token["id_token"],
+        key=discovery_document['jwks'],
+        audience=CONFIG.client_id)
+    max_age = int(int(id_token_dict['exp']) - time.time())
+    multi_value_headers = {
+        'Set-Cookie': ['{}={}; Secure; HttpOnly; Max-Age={}'.format(
+            CONFIG.token_cookie_name,
+            token["id_token"],
+            max_age)]}
+
+    if state in store['role_arn']:
+        return redirect_to_web_console(
+            discovery_document['jwks'],
+            token["id_token"],
+            store['role_arn'][state],
+            multi_value_headers)
+    else:
+        # show role picker
+        try:
+            role_map = exchange_token_for_roles(
+                discovery_document['jwks'],
+                token["id_token"])
+        except AccessDenied as e:
+            return {
+                'statusCode': 403,
+                'headers': {'Content-Type': 'text/html'},
+                'body': "Access denied : {}".format(e)}
+        roles = {
+            "roles": []
+        }
+        for arn in role_map["roles"]:
+            account_id = arn.split(":")[4]
+            alias = role_map.get(
+                "aliases", {}).get(account_id, [account_id])[0]
+            name = arn.split(':')[5].split('/')[-1]
+
+            roles["roles"].append(
+                {
+                    "alias": alias,
+                    "arn": arn,
+                    "id": account_id,
+                    "name": name,
+                }
+            )
+
+        # Sort the list by role name
+        roles["roles"] = sorted(roles["roles"], key=lambda x: x['name'])
+        response = {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'text/html'},
+            'multiValueHeaders': multi_value_headers,
+            'body': CONFIG.role_picker_template.render(roles=roles["roles"])
+        }
+    return response
+
+
+# /
+def redirect_to_idp(role_arn: Optional[str] = None) -> dict:
+    """API Gateway / endpoint which redirects the user to the identity
+    provider
+
+    :param role_arn: An optional AWS IAM Role ARN
+    :return: An AWS API Gateway output dictionary for proxy mode
+    """
+    global store, discovery_document
+    if 'store' not in globals():
+        store = get_store()
+        # TODO : Am I doing this right with these globals?
+    if 'discovery_document' not in globals():
+        logger.debug('Fetching discovery document')
+        discovery_document = get_discovery_document(CONFIG.discovery_url)
+
+    code_verifier = base64_without_padding(os.urandom(32))
+    code_challenge = base64_without_padding(hashlib.sha256(
+        code_verifier.encode()).digest())
+    state = base64_without_padding(os.urandom(32))
+    cookie_value = base64_without_padding(os.urandom(32))
+    for key in STORE_KEYS:
+        if key not in store:
+            store[key] = dict()
+    store['cookie'][state] = cookie_value
+    store['code_verifier'][state] = code_verifier
+    store['expiry'][state] = int(time.time()) + 3600
+    if role_arn:
+        store['role_arn'][state] = role_arn
+    store = put_store(store)
+
+    url_parameters = {
+        "scope": CONFIG.oidc_scope,
+        "response_type": "code",
+        "redirect_uri": CONFIG.redirect_uri,
+        "client_id": CONFIG.client_id,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+    }
+    # We don't set audience here because Auth0 will set the audience on
+    # it's own
+    auth_endpoint = urllib.parse.urlparse(
+        discovery_document['authorization_endpoint'])
+    redirect_url_tuple = auth_endpoint._replace(
+        query=urllib.parse.urlencode(url_parameters))
+    redirect_url = urllib.parse.urlunparse(redirect_url_tuple)
+    # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#api-gateway-simple-proxy-for-lambda-output-format
+    response = {
+        'statusCode': 302,
+        'headers': {
+            'Location': redirect_url,
+            'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600'.format(
+                CONFIG.login_cookie_name,
+                cookie_value),
+            'Content-Type': 'text/html'
+        },
+        'body': 'Redirecting to identity provider'
+    }
+    return response
+
+
+def lambda_handler(event: dict, context: dict) -> dict:
+    """Handler for all API Gateway requests
+
+    :param event: AWS API Gateway input fields for AWS Lambda
+    :param context: Lambda context about the invokation and environment
+    :return: An AWS API Gateway output dictionary for proxy mode
+    """
+
+    global store, discovery_document
+
+    path = event.get('path')
+    headers = event['headers'] if event['headers'] is not None else {}
+    cookie_header = headers.get('cookie', '')
+    query_string_parameters = (
+        event['queryStringParameters']
+        if event['queryStringParameters'] is not None else {})
+    try:
+        if path == '/':
+            role_arn = query_string_parameters.get('role_arn')
+            return redirect_to_idp(role_arn)
+        elif path == '/redirect_uri':
+            state = query_string_parameters.get('state')
+            code = query_string_parameters.get('code')
+            return login(state, code, cookie_header)
+        elif path == '/pick_role':
+            role_arn = query_string_parameters.get('role')
+            return pick_role(cookie_header, role_arn)
+        else:
+            return {
+                'headers': {'Content-Type': 'text/html'},
+                'statusCode': 404,
+                'body': 'Path "{}" not found. Event is {}'.format(path, event)}
+    except Exception as e:
+        logger.error(str(e))
+        logger.error(traceback.format_exc())
+        return {
+            'headers': {'Content-Type': 'text/html'},
+            'statusCode': 500,
+            'body': 'Error'}
