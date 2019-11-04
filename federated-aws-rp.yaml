@@ -129,6 +129,7 @@ Resources:
           CLIENT_ID: !Ref ClientId
           DISCOVERY_URL: !Ref DiscoveryUrl
           DOMAIN_NAME: !Ref CustomDomainName  # What if a domain name isn't provided?
+          LOG_LEVEL: INFO
       Handler: federated_aws_rp.app.lambda_handler
       Runtime: python3.7
       Role: !GetAtt AwsFederatedRpFunctionRole.Arn

@@ -15,6 +15,7 @@ CONFIG.s3_file_path_store = os.getenv(
 CONFIG.client_id = os.getenv('CLIENT_ID')
 CONFIG.domain_name = os.getenv('DOMAIN_NAME')
 CONFIG.discovery_url = os.getenv('DISCOVERY_URL')
+CONFIG.log_level = os.getenv('LOG_LEVEL', 'INFO')
 
 CONFIG.bypass_cache = False
 CONFIG.redirect_uri_path = '/redirect_uri'
@@ -22,13 +23,13 @@ CONFIG.redirect_uri_path = '/redirect_uri'
 CONFIG.oidc_scope = 'openid'
 CONFIG.redirect_uri = urllib.parse.urlunparse(
     ('https', CONFIG.domain_name, CONFIG.redirect_uri_path, '', '', ''))
-CONFIG.login_cookie_name = 'federated-aws-rp'
-CONFIG.token_cookie_name = 'federated-aws-rp-token'
+CONFIG.cookie_name = 'federated-aws-rp'
 CONFIG.id_token_for_roles_url = 'https://roles-and-aliases.security.mozilla.org/roles'
+CONFIG.default_destionation_url = 'https://console.aws.amazon.com/console/home'
 CONFIG.role_picker_template = Template('''{% block body %}
   <ul>
   {% for role in roles %}
-    <li><a href="/pick_role?role={{ role.arn }}">{{ role.name }}</a><br><span style="margin-left: 2em;">Account: {{role.alias}} ({{role.id}})</span></li>
+    <li><a href="/pick_role?role_arn={{ role.arn }}">{{ role.name }}</a><br><span style="margin-left: 2em;">Account: {{role.alias}} ({{role.id}})</span></li>
   {% endfor %}
   </ul>
 {% endblock %}''')
