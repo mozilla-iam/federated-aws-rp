@@ -135,7 +135,7 @@ def login(state: str, code: str, cookie_header: str) -> dict:
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'text/html',
-                'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600'.format(
+                'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600; SameSite=strict'.format(
                     CONFIG.cookie_name,
                     encode_cookie_value(store))
             },
