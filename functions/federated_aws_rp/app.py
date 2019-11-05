@@ -73,12 +73,12 @@ def login(state: str, code: str, cookie_header: str) -> dict:
     try:
         if 'state' is None:
             raise AccessDenied('"state" query parameter is missing"')
+        elif 'code' is None:
+            raise AccessDenied('"code" query parameter is missing')
         store = get_store(cookie_header)
         if store.get('state') != state:
             raise AccessDenied('Invalid "state" query parameter passed')
-        if 'code' is None:
-            raise AccessDenied('"code" query parameter is missing')
-        if 'code_verifier' not in store:
+        elif 'code_verifier' not in store:
             raise AccessDenied(
                 '"code_verifier" not found in cookie')
     except AccessDenied as e:
@@ -91,7 +91,7 @@ def login(state: str, code: str, cookie_header: str) -> dict:
         discovery_document['token_endpoint'],
         code)
     jwt.decode(
-        token=token["id_token"],
+        token=token['id_token'],
         key=discovery_document['jwks'],
         audience=CONFIG.client_id)
     store['id_token'] = token['id_token']

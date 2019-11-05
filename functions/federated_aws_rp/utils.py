@@ -103,11 +103,10 @@ def exchange_code_for_token(
     # TODO : Wait should we not do PKCE because this is a traditional RP
     # and instead use a client secret?
     logger.debug('Requesting token with arguments {}'.format(body))
-    token = requests.post(
+    return requests.post(
         token_endpoint,
         headers=headers,
         json=body).json()
-    return token
 
 
 def exchange_token_for_roles(jwks: str, id_token: str) -> dict:
