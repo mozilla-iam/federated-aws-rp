@@ -137,7 +137,11 @@ def exchange_token_for_roles(jwks: str, id_token: str) -> dict:
     return result.json()
 
 
-def get_api_keys(jwks: str, id_token: str, role_arn: str) -> dict:
+def get_api_keys(
+        jwks: str,
+        id_token: str,
+        role_arn: str,
+        session_duration: int) -> dict:
     """Exchange an ID token for a set of AWS STS API keys
 
     Submit an OIDC ID token to the STS AssumeRoleWithWebIdentity endpoint to
@@ -165,12 +169,19 @@ def get_api_keys(jwks: str, id_token: str, role_arn: str) -> dict:
     try:
         client = boto3.client('sts')
         # If the MaxSessionDuration configured on the role described by
-        # role_arn is less than 43200 this will fail.
+        # role_arn is less than session_duration this will fail.
+        logger.debug(
+            'Calling assume_role_with_web_identity with role ARN {} session '
+            'name {} and duration {}'.format(
+                role_arn,
+                role_session_name,
+                session_duration
+            ))
         response = client.assume_role_with_web_identity(
             RoleArn=role_arn,
             RoleSessionName=role_session_name,
             WebIdentityToken=id_token,
-            DurationSeconds=43200  # 12 hours
+            DurationSeconds=session_duration
         )
         return response['Credentials']
     except Exception as e:
@@ -276,7 +287,11 @@ def redirect_to_web_console(
     if 'role_arn' not in store:
         raise AccessDenied(
             'Missing "role_arn" query parameter')
-    credentials = get_api_keys(jwks, store.get('id_token'), store['role_arn'])
+    credentials = get_api_keys(
+        jwks,
+        store.get('id_token'),
+        store['role_arn'],
+        store['session_duration'])
     issuer_url_query = urllib.parse.urlencode({
         "role_arn": store['role_arn']
     })

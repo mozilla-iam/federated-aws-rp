@@ -15,6 +15,7 @@ class Config:
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
 
         self.bypass_cache = False
+        self.default_session_duration = 43200  # 12 hours
         self.redirect_uri_path = '/redirect_uri'
         # self.oidc_scope = 'openid email'
         self.oidc_scope = 'openid'

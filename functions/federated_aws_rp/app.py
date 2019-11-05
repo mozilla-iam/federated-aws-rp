@@ -147,7 +147,8 @@ def login(state: str, code: str, cookie_header: str) -> dict:
 # /
 def redirect_to_idp(
         destination_url: str,
-        role_arn: Optional[str] = None) -> dict:
+        role_arn: Optional[str] = None,
+        session_duration: Optional[int] = None) -> dict:
     """API Gateway / endpoint which redirects the user to the identity
     provider
 
@@ -170,7 +171,8 @@ def redirect_to_idp(
     store = {
         'state': state,
         'code_verifier': code_verifier,
-        'destination_url': destination_url
+        'destination_url': destination_url,
+        'session_duration': session_duration
     }
     if role_arn:
         store['role_arn'] = role_arn
@@ -225,8 +227,10 @@ def lambda_handler(event: dict, context: dict) -> dict:
     try:
         if path == '/':
             role_arn = query_string_parameters.get('role_arn')
+            session_duration = int(query_string_parameters.get(
+                'session_duration', CONFIG.default_session_duration))
             destination_url = get_destination_url(referer)
-            return redirect_to_idp(destination_url, role_arn)
+            return redirect_to_idp(destination_url, role_arn, session_duration)
         elif path == '/redirect_uri':
             state = query_string_parameters.get('state')
             code = query_string_parameters.get('code')
