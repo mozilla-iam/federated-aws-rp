@@ -75,6 +75,22 @@ def get_discovery_document(discovery_url: str) -> dict:
     return result
 
 
+def get_role_arn(query_string_parameters: dict) -> Optional[str]:
+    """Given a set of query parameters, return an IAM Role ARN
+
+    :param query_string_parameters: Dictionary of URL query parameters
+    :return: IAM Role ARN
+    """
+    if 'role_arn' in query_string_parameters:
+        return query_string_parameters['role_arn']
+    elif {'role', 'account'} <= query_string_parameters.keys():
+        return 'arn:aws:iam::{}:role/{}'.format(
+            query_string_parameters['account'],
+            query_string_parameters['role'])
+    else:
+        return None
+
+
 def exchange_code_for_token(
         code_verifier: str,
         token_endpoint: str,
@@ -292,7 +308,8 @@ def redirect_to_web_console(
         store['role_arn'],
         store['session_duration'])
     issuer_url_query = urllib.parse.urlencode({
-        "role_arn": store['role_arn']
+        "account": store['role_arn'].split(':')[4],
+        "role": store['role_arn'].split(':')[5].split('/')[-1]
     })
     issuer_url = urllib.parse.urlunparse(
         ('https', CONFIG.domain_name, '/', '', issuer_url_query, ''))

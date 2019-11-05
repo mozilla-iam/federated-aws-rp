@@ -14,6 +14,7 @@ from .utils import (
     get_store,
     get_discovery_document,
     get_destination_url,
+    get_role_arn,
     encode_cookie_value,
     exchange_code_for_token,
     exchange_token_for_roles,
@@ -226,7 +227,7 @@ def lambda_handler(event: dict, context: dict) -> dict:
         if event['queryStringParameters'] is not None else {})
     try:
         if path == '/':
-            role_arn = query_string_parameters.get('role_arn')
+            role_arn = get_role_arn(query_string_parameters)
             session_duration = int(query_string_parameters.get(
                 'session_duration', CONFIG.default_session_duration))
             destination_url = get_destination_url(referer)
