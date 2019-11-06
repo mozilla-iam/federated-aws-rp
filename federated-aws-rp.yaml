@@ -1,0 +1,277 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Lambda function and API Gateway which allow a user to access the AWS web console via OIDC federated login
+Metadata:
+  Source: https://github.com/mozilla-iam/federated-aws-rp/blob/master/federated-aws-rp.yaml
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: S3
+      Parameters:
+      - S3BucketName
+      - StoreS3FilePath
+    - Label:
+        default: OpenID Connect
+      Parameters:
+      - ClientId
+      - DiscoveryUrl
+    - Label:
+        default: API
+      Parameters:
+      - CustomDomainName
+      - DomainNameZone
+      - CertificateArn
+    ParameterLabels:
+      S3BucketName:
+        default: S3 Bucket Name
+      StoreS3FilePath:
+        default: Store S3 File Path
+      ClientId:
+        default: Client ID issued by the identity provider
+      DiscoveryUrl:
+        default: The OpenID Connect Discovery URL of the identity provider
+      CustomDomainName:
+        default: Custom DNS Domain Name
+      DomainNameZone:
+        default: DNS Zone containing the Custom DNS Domain Name
+      CertificateArn:
+        default: AWS ACM Certificate ARN for the Custom DNS Domain Name
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: The S3 bucket containing the group role map file in
+  StoreS3FilePath:
+    Type: String
+    Description: The path to the AWS Federated RP store file
+    Default: aws-federated-rp-store.json
+  ClientId:
+    Type: String
+    Description: OIDC Application/Client Client ID
+  DiscoveryUrl:
+    Type: String
+    Description: The URL to the OIDC discovery endpoint for the identity provider
+    Default: ''
+  CustomDomainName:
+    Type: String
+    Description: The custom domain name to use for the API
+    Default: ''
+  DomainNameZone:
+    Type: String
+    Description: The Route53 DNS zone containing the custom domain name
+    Default: ''
+  CertificateArn:
+    Type: String
+    Description: The ARN of the AWS ACM Certificate for your custom domain name
+    Default: ''
+Conditions:
+  UseCustomDomainName: !Not [ !Equals [ !Ref 'CustomDomainName', '' ] ]
+Rules:
+  DomainNameAndCertificateArnProvided:
+    RuleCondition: !Or [ !Not [ !Equals [ !Ref 'CustomDomainName', '' ] ], !Not [ !Equals [ !Ref 'DomainNameZone', '' ] ], !Not [ !Equals [ !Ref 'CertificateArn', '' ] ] ]
+    Assertions:
+      - Assert: !And [ !Not [ !Equals [ !Ref 'CustomDomainName', '' ] ], !Not [ !Equals [ !Ref 'DomainNameZone', '' ] ], !Not [ !Equals [ !Ref 'CertificateArn', '' ] ] ]
+        AssertDescription: If you set a CustomDomainName, DomainNameZone or CertificateArn you must provide all values
+Resources:
+  AwsFederatedRpFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+        - PolicyName: AllowLambdaLogging
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+        - PolicyName: AllowModifyS3Store
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Join ['', ['arn:aws:s3:::', !Ref 'S3BucketName', '/', !Ref 'StoreS3FilePath']]
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Join ['', ['arn:aws:s3:::', !Ref 'S3BucketName']]
+        - PolicyName: AllowAssumeRoleWithWebIdentity
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRoleWithWebIdentity
+                Resource:
+                  - '*'
+  AwsFederatedRpFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: AWS Federated login website / relying party
+      Code: build/
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref S3BucketName
+          S3_FILE_PATH_STORE: !Ref StoreS3FilePath
+          CLIENT_ID: !Ref ClientId
+          DISCOVERY_URL: !Ref DiscoveryUrl
+          DOMAIN_NAME: !Ref CustomDomainName  # What if a domain name isn't provided?
+          LOG_LEVEL: INFO
+      Handler: federated_aws_rp.app.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt AwsFederatedRpFunctionRole.Arn
+      Tags:
+        - Key: application
+          Value: federated-aws-rp
+        - Key: stack
+          Value: !Ref AWS::StackName
+        - Key: source
+          Value: https://github.com/mozilla-iam/federated-aws-rp/
+      Timeout: 900
+  AwsFederatedRpFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      # Let's hope that the Lambda function doesn't execute before this LogGroup
+      # resource is created, creating the LogGroup with no expiration and
+      # preventing this resource from creating
+      LogGroupName: !Join [ '/', ['/aws/lambda', !Ref 'AwsFederatedRpFunction' ] ]
+      RetentionInDays: 14
+  AwsFederatedRpDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Condition: UseCustomDomainName
+    Properties:
+      RegionalCertificateArn: !Ref CertificateArn
+      DomainName: !Ref CustomDomainName
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+  AwsFederatedRpRoute53RecordSet:
+    Type: AWS::Route53::RecordSet
+    Condition: UseCustomDomainName
+    Properties:
+      AliasTarget:
+        DNSName: !GetAtt AwsFederatedRpDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt AwsFederatedRpDomainName.RegionalHostedZoneId
+      Comment: Bind the custom domain name to the AwsFederatedRp API Gateway
+      HostedZoneName: !Ref DomainNameZone
+      Name: !Ref CustomDomainName
+      Type: A
+  AwsFederatedRpApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: AwsFederatedRp
+      Description: AWS Federated login website / relying party
+      FailOnWarnings: true
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+  AwsFederatedRpBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: UseCustomDomainName
+    Properties:
+      DomainName: !Ref AwsFederatedRpDomainName
+      RestApiId: !Ref AwsFederatedRpApi
+      Stage: !Ref AwsFederatedRpApiStage
+  AwsFederatedRpLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:invokeFunction
+      FunctionName: !GetAtt AwsFederatedRpFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Join [ '', [ 'arn:aws:execute-api:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref 'AwsFederatedRpApi', '/*/*' ] ]
+  AwsFederatedRpApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref AwsFederatedRpApiDeployment
+      MethodSettings:
+        - DataTraceEnabled: true
+          HttpMethod: '*'
+          # LoggingLevel: INFO
+          ResourcePath: /*
+      RestApiId: !Ref AwsFederatedRpApi
+      Tags:
+        - Key: application
+          Value: federated-aws-rp
+        - Key: stack
+          Value: !Ref AWS::StackName
+        - Key: source
+          Value: https://github.com/mozilla-iam/federated-aws-rp/
+      # Description: x
+      # StageName: LATEST
+  AwsFederatedRpApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - AwsFederatedRpRequest
+    Properties:
+      RestApiId: !Ref AwsFederatedRpApi
+      StageName: DummyStage
+      # Note This property is required by API Gateway. We recommend that you
+      # specify a name using any value (see Examples) and that you don’t use
+      # this stage. We recommend not using this stage because it is tied to
+      # this deployment, which means you can’t delete one without deleting the
+      # other. For example, if you delete this deployment, API Gateway also
+      # deletes this stage, which you might want to keep. Instead, use the
+      # AWS::ApiGateway::Stage resource to create and associate a stage with
+      # this deployment.
+  AwsFederatedRpResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AwsFederatedRpApi
+      ParentId: !GetAtt AwsFederatedRpApi.RootResourceId
+      PathPart: '{proxy+}'
+  AwsFederatedRpRequest:
+    DependsOn: AwsFederatedRpLambdaPermission
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Type: AWS_PROXY
+        # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#set-up-lambda-proxy-integration-using-cli
+        # "For Lambda integrations, you must use the HTTP method of POST for the
+        # integration request, according to the specification of the Lambda service
+        # action for function invocations."
+        IntegrationHttpMethod: POST
+        Uri: !Join [ '', [ 'arn:aws:apigateway:', !Ref 'AWS::Region', ':lambda:path/2015-03-31/functions/', !GetAtt 'AwsFederatedRpFunction.Arn', '/invocations' ] ]
+      ResourceId: !Ref AwsFederatedRpResource
+      RestApiId: !Ref AwsFederatedRpApi
+# https://stackoverflow.com/q/46578615/168874
+# https://stackoverflow.com/q/52909329/168874
+  AwsFederatedRpRootRequest:
+    DependsOn: AwsFederatedRpLambdaPermission
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        Type: AWS_PROXY
+        # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#set-up-lambda-proxy-integration-using-cli
+        # "For Lambda integrations, you must use the HTTP method of POST for the
+        # integration request, according to the specification of the Lambda service
+        # action for function invocations."
+        IntegrationHttpMethod: POST
+        Uri: !Join [ '', [ 'arn:aws:apigateway:', !Ref 'AWS::Region', ':lambda:path/2015-03-31/functions/', !GetAtt 'AwsFederatedRpFunction.Arn', '/invocations' ] ]
+      # https://stackoverflow.com/a/56121914/168874
+      ResourceId: !GetAtt AwsFederatedRpApi.RootResourceId
+      RestApiId: !Ref AwsFederatedRpApi
+Outputs:
+  AwsFederatedRpUrl:
+    Description: The URL of the AWS Federated RP
+    Value:
+      Fn::If:
+        - UseCustomDomainName
+        - !Join [ '', [ 'https://', !Ref 'CustomDomainName', '/'] ]
+        - !Join [ '', [ 'https://', !Ref 'AwsFederatedRpApi', '.execute-api.', !Ref 'AWS::Region', '.amazonaws.com/', !Ref 'AwsFederatedRpApiStage', '/' ] ]
