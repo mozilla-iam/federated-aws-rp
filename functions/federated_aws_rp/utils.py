@@ -12,6 +12,7 @@ import boto3
 from .config import CONFIG
 
 logger = logging.getLogger(__name__)
+logger.setLevel(CONFIG.log_level)
 
 
 class AccessDenied(Exception):
