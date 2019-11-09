@@ -5,11 +5,6 @@ Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
     - Label:
-        default: S3
-      Parameters:
-      - S3BucketName
-      - StoreS3FilePath
-    - Label:
         default: OpenID Connect
       Parameters:
       - ClientId
@@ -21,10 +16,6 @@ Metadata:
       - DomainNameZone
       - CertificateArn
     ParameterLabels:
-      S3BucketName:
-        default: S3 Bucket Name
-      StoreS3FilePath:
-        default: Store S3 File Path
       ClientId:
         default: Client ID issued by the identity provider
       DiscoveryUrl:
@@ -36,13 +27,6 @@ Metadata:
       CertificateArn:
         default: AWS ACM Certificate ARN for the Custom DNS Domain Name
 Parameters:
-  S3BucketName:
-    Type: String
-    Description: The S3 bucket containing the group role map file in
-  StoreS3FilePath:
-    Type: String
-    Description: The path to the AWS Federated RP store file
-    Default: aws-federated-rp-store.json
   ClientId:
     Type: String
     Description: OIDC Application/Client Client ID
@@ -94,20 +78,6 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: '*'
-        - PolicyName: AllowModifyS3Store
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                Resource:
-                  - !Join ['', ['arn:aws:s3:::', !Ref 'S3BucketName', '/', !Ref 'StoreS3FilePath']]
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                Resource: !Join ['', ['arn:aws:s3:::', !Ref 'S3BucketName']]
         - PolicyName: AllowAssumeRoleWithWebIdentity
           PolicyDocument:
             Version: 2012-10-17
@@ -124,8 +94,6 @@ Resources:
       Code: build/
       Environment:
         Variables:
-          S3_BUCKET_NAME: !Ref S3BucketName
-          S3_FILE_PATH_STORE: !Ref StoreS3FilePath
           CLIENT_ID: !Ref ClientId
           DISCOVERY_URL: !Ref DiscoveryUrl
           DOMAIN_NAME: !Ref CustomDomainName  # What if a domain name isn't provided?
