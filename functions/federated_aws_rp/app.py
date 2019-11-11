@@ -136,6 +136,7 @@ def login(state: str, code: str, cookie_header: str) -> dict:
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'text/html',
+                'Cache-Control': 'max-age=0',
                 'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600; SameSite=strict'.format(
                     CONFIG.cookie_name,
                     encode_cookie_value(store))
@@ -199,6 +200,7 @@ def redirect_to_idp(
         'statusCode': 302,
         'headers': {
             'Location': redirect_url,
+            'Cache-Control': 'max-age=0',
             'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600'.format(
                 CONFIG.cookie_name,
                 encode_cookie_value(store)),
@@ -219,9 +221,10 @@ def lambda_handler(event: dict, context: dict) -> dict:
     global discovery_document
 
     path = event.get('path')
+    logger.debug('event is {}'.format(event))
     headers = event['headers'] if event['headers'] is not None else {}
-    cookie_header = headers.get('cookie', '')
-    referer = headers.get('referer', '')
+    cookie_header = headers.get('Cookie', '')
+    referer = headers.get('Referer', '')
     query_string_parameters = (
         event['queryStringParameters']
         if event['queryStringParameters'] is not None else {})

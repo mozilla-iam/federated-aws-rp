@@ -12,6 +12,7 @@ import boto3
 from .config import CONFIG
 
 logger = logging.getLogger(__name__)
+logger.setLevel(CONFIG.log_level)
 
 
 class AccessDenied(Exception):
@@ -319,6 +320,7 @@ def redirect_to_web_console(
         'statusCode': 302,
         'headers': {
             'Content-Type': 'text/html',
+            'Cache-Control': 'max-age=0',
             'Location': url,
             'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600'.format(
                 CONFIG.cookie_name,

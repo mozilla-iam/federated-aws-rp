@@ -6,9 +6,6 @@ from jinja2 import Template
 
 class Config:
     def __init__(self):
-        self.s3_bucket_name = os.getenv('S3_BUCKET_NAME')
-        self.s3_file_path_store = os.getenv(
-            'S3_FILE_PATH_STORE', 'federated-aws-rp-store.json')
         self.client_id = os.getenv('CLIENT_ID')
         self.domain_name = os.getenv('DOMAIN_NAME')
         self.discovery_url = os.getenv('DISCOVERY_URL')
