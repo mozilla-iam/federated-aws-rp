@@ -33,6 +33,10 @@ if ! echo "$result" | grep 'arn:aws:sts' >/dev/null; then
 elif ! echo "$result" | grep "$ACCOUNT_ID" >/dev/null; then
   echo "Unable to access AWS or wrong account"
   exit 1
+elif ! python -c 'import boto3; print(boto3.Session().region_name)' | grep "us-east-1" >/dev/null; then
+  echo "Region must be us-east-1 to support CloudFront"
+  echo "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html#https-requirements-aws-region"
+  exit 1
 fi
 set -e
 
@@ -61,14 +65,21 @@ else
   wait_verb=stack-create-complete
 fi
 
-aws cloudformation deploy --template-file $TMPFILE --stack-name $STACK_NAME \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides \
-    $PARAMETER_OVERRIDES
-
-echo "Waiting for stack to reach a COMPLETE state"
-aws cloudformation wait $wait_verb --stack-name  $STACK_NAME
-
-if [ "$OUTPUT_VAR_NAME" ]; then
-  aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='${OUTPUT_VAR_NAME}'].OutputValue" --output text
+set +e
+if aws cloudformation deploy --template-file $TMPFILE --stack-name $STACK_NAME \
+    --capabilities CAPABILITY_IAM \
+    --parameter-overrides \
+      $PARAMETER_OVERRIDES; then
+  echo "Waiting for stack to reach a COMPLETE state"
+  if aws cloudformation wait $wait_verb --stack-name  $STACK_NAME; then
+    if [ "$OUTPUT_VAR_NAME" ]; then
+      aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='${OUTPUT_VAR_NAME}'].OutputValue" --output text
+    fi
+    exit 0
+  fi
 fi
+aws cloudformation describe-stack-events \
+  --stack-name $STACK_NAME \
+  --query 'StackEvents[?ends_with(ResourceStatus, `_FAILED`)].[LogicalResourceId, ResourceType, ResourceStatusReason]' \
+  --output text
+exit 1
