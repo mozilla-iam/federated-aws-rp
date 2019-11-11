@@ -117,23 +117,14 @@ Resources:
       # preventing this resource from creating
       LogGroupName: !Join [ '/', ['/aws/lambda', !Ref 'AwsFederatedRpFunction' ] ]
       RetentionInDays: 14
-  AwsFederatedRpDomainName:
-    Type: AWS::ApiGateway::DomainName
-    Condition: UseCustomDomainName
-    Properties:
-      RegionalCertificateArn: !Ref CertificateArn
-      DomainName: !Ref CustomDomainName
-      EndpointConfiguration:
-        Types:
-          - REGIONAL
   AwsFederatedRpRoute53RecordSet:
     Type: AWS::Route53::RecordSet
     Condition: UseCustomDomainName
     Properties:
       AliasTarget:
-        DNSName: !GetAtt AwsFederatedRpDomainName.RegionalDomainName
-        HostedZoneId: !GetAtt AwsFederatedRpDomainName.RegionalHostedZoneId
-      Comment: Bind the custom domain name to the AwsFederatedRp API Gateway
+        DNSName: !GetAtt AwsFederatedRpCloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget-1.html
+      Comment: Bind the custom domain name to the AwsFederatedRp CloudFront fronted API Gateway
       HostedZoneName: !Ref DomainNameZone
       Name: !Ref CustomDomainName
       Type: A
@@ -146,13 +137,6 @@ Resources:
       EndpointConfiguration:
         Types:
           - REGIONAL
-  AwsFederatedRpBasePathMapping:
-    Type: AWS::ApiGateway::BasePathMapping
-    Condition: UseCustomDomainName
-    Properties:
-      DomainName: !Ref AwsFederatedRpDomainName
-      RestApiId: !Ref AwsFederatedRpApi
-      Stage: !Ref AwsFederatedRpApiStage
   AwsFederatedRpLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -216,9 +200,10 @@ Resources:
         Uri: !Join [ '', [ 'arn:aws:apigateway:', !Ref 'AWS::Region', ':lambda:path/2015-03-31/functions/', !GetAtt 'AwsFederatedRpFunction.Arn', '/invocations' ] ]
       ResourceId: !Ref AwsFederatedRpResource
       RestApiId: !Ref AwsFederatedRpApi
-# https://stackoverflow.com/q/46578615/168874
-# https://stackoverflow.com/q/52909329/168874
   AwsFederatedRpRootRequest:
+    # This resource is necessary to get API Gateway to respond to requests for the '/' path
+    # https://stackoverflow.com/q/46578615/168874
+    # https://stackoverflow.com/q/52909329/168874
     DependsOn: AwsFederatedRpLambdaPermission
     Type: AWS::ApiGateway::Method
     Properties:
@@ -235,6 +220,60 @@ Resources:
       # https://stackoverflow.com/a/56121914/168874
       ResourceId: !GetAtt AwsFederatedRpApi.RootResourceId
       RestApiId: !Ref AwsFederatedRpApi
+  AwsFederatedRpCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: UseCustomDomainName
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Ref CustomDomainName
+        Comment: !Join [ ':', [!Ref 'AWS::StackName', 'AWS Federated RP CloudFront distribution']]
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          DefaultTTL: 0
+          MinTTL: 0
+          MaxTTL: 0
+          ForwardedValues:
+            Cookies:
+              Forward: all
+            QueryString: true
+            Headers:
+              # Explicity requesting that "Referer" be passed through because we need it and there doesn't seem
+              # to be a way to request that all headers be passed through
+              # https://gist.github.com/gene1wood/c0249066d2562e410ddecd8a6fee8306
+              - Referer
+          TargetOriginId: AwsFederatedRpCloudFrontOriginId
+          ViewerProtocolPolicy: redirect-to-https
+        # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-distributionconfig.html#cfn-cloudfront-distribution-distributionconfig-defaultrootobject
+        DefaultRootObject: ''  # "If you don't want to specify a default root object when you create a distribution, include an empty DefaultRootObject element."
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        #Logging:
+        #  Logging
+        Origins:
+          - CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+            DomainName: !Join [ '.', [ !Ref 'AwsFederatedRpApi', 'execute-api', !Ref 'AWS::Region', 'amazonaws.com' ] ]
+            Id: AwsFederatedRpCloudFrontOriginId
+            OriginPath: !Join [ '', [ '/', !Ref 'AwsFederatedRpApiStage' ] ]
+        PriceClass: PriceClass_100  # US, Canada, Europe, Israel
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          MinimumProtocolVersion: TLSv1.2_2018
+          SslSupportMethod: sni-only
+      Tags:
+        - Key: application
+          Value: federated-aws-rp
+        - Key: stack
+          Value: !Ref AWS::StackName
+        - Key: source
+          Value: https://github.com/mozilla-iam/federated-aws-rp/
 Outputs:
   AwsFederatedRpUrl:
     Description: The URL of the AWS Federated RP
