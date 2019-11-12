@@ -4,8 +4,6 @@ PROD_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME	:= public.us-east-1.infosec.mozilla.org
 DEV_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME	:= public.us-east-1.security.allizom.org
 PROD_ACCOUNT_ID		:= 371522382791
 DEV_ACCOUNT_ID		:= 656532927350
-PROD_RP_DATA_STORE_S3_BUCKET_NAME	:= prod-mozilla-aws-federated-rp-data-store
-DEV_RP_DATA_STORE_S3_BUCKET_NAME	:= dev-mozilla-aws-federated-rp-data-store
 PROD_DOMAIN_NAME	:= aws.security.mozilla.org
 DEV_DOMAIN_NAME		:= aws.security.allizom.org
 PROD_DOMAIN_ZONE	:= security.mozilla.org.
@@ -23,8 +21,7 @@ deploy-aws-federated-rp-dev:
 		 $(DEV_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME) \
 		 $(FEDERATED_AWS_RP_STACK_NAME) \
 		 $(FEDERATED_AWS_RP_CODE_STORAGE_S3_PREFIX) \
-		 "S3BucketName=$(DEV_RP_DATA_STORE_S3_BUCKET_NAME) \
-		 	ClientId=$(PROD_CLIENT_ID) \
+		 "ClientId=$(PROD_CLIENT_ID) \
 		 	DiscoveryUrl=$(PROD_DISCOVERY_URL) \
 		 	CustomDomainName=$(DEV_DOMAIN_NAME) \
 		 	DomainNameZone=$(DEV_DOMAIN_ZONE) \
@@ -39,8 +36,7 @@ deploy-aws-federated-rp:
 		 $(PROD_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME) \
 		 $(FEDERATED_AWS_RP_STACK_NAME) \
 		 $(FEDERATED_AWS_RP_CODE_STORAGE_S3_PREFIX) \
-		 "S3BucketName=$(PROD_RP_DATA_STORE_S3_BUCKET_NAME) \
-		 	ClientId=$(PROD_CLIENT_ID) \
+		 "ClientId=$(PROD_CLIENT_ID) \
 		 	DiscoveryUrl=$(PROD_DISCOVERY_URL) \
 		 	CustomDomainName=$(PROD_DOMAIN_NAME) \
 		 	DomainNameZone=$(PROD_DOMAIN_ZONE) \
