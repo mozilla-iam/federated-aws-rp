@@ -1,16 +1,14 @@
 FEDERATED_AWS_RP_STACK_NAME	:= FederatedAWSRP
 FEDERATED_AWS_RP_CODE_STORAGE_S3_PREFIX	:= federated-aws-rp
-PROD_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME	:= public.us-east-1.infosec.mozilla.org
+PROD_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME	:= public.us-east-1.iam.mozilla.com
 DEV_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME	:= public.us-east-1.security.allizom.org
-PROD_ACCOUNT_ID		:= 371522382791
+PROD_ACCOUNT_ID		:= 320464205386
 DEV_ACCOUNT_ID		:= 656532927350
-PROD_RP_DATA_STORE_S3_BUCKET_NAME	:= prod-mozilla-aws-federated-rp-data-store
-DEV_RP_DATA_STORE_S3_BUCKET_NAME	:= dev-mozilla-aws-federated-rp-data-store
-PROD_DOMAIN_NAME	:= aws.security.mozilla.org
+PROD_DOMAIN_NAME	:= aws.sso.mozilla.com
 DEV_DOMAIN_NAME		:= aws.security.allizom.org
-PROD_DOMAIN_ZONE	:= security.mozilla.org.
+PROD_DOMAIN_ZONE	:= sso.mozilla.com.
 DEV_DOMAIN_ZONE		:= security.allizom.org.
-PROD_CERT_ARN		:= arn:aws:acm:us-east-1:371522382791:certificate/055b681f-e48c-4aef-9a12-c4c276b0e73a
+PROD_CERT_ARN		:= arn:aws:acm:us-east-1:320464205386:certificate/29d28c00-40d2-4361-a6ef-f8b1441b171f
 DEV_CERT_ARN		:= arn:aws:acm:us-east-1:656532927350:certificate/8f78c838-67e8-426b-8132-61165bf2cd7b
 PROD_CLIENT_ID		:= N7lULzWtfVUDGymwDs0yDEq6ZcwmFazj
 PROD_DISCOVERY_URL	:= https://auth.mozilla.auth0.com/.well-known/openid-configuration
@@ -23,8 +21,7 @@ deploy-aws-federated-rp-dev:
 		 $(DEV_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME) \
 		 $(FEDERATED_AWS_RP_STACK_NAME) \
 		 $(FEDERATED_AWS_RP_CODE_STORAGE_S3_PREFIX) \
-		 "S3BucketName=$(DEV_RP_DATA_STORE_S3_BUCKET_NAME) \
-		 	ClientId=$(PROD_CLIENT_ID) \
+		 "ClientId=$(PROD_CLIENT_ID) \
 		 	DiscoveryUrl=$(PROD_DISCOVERY_URL) \
 		 	CustomDomainName=$(DEV_DOMAIN_NAME) \
 		 	DomainNameZone=$(DEV_DOMAIN_ZONE) \
@@ -39,8 +36,7 @@ deploy-aws-federated-rp:
 		 $(PROD_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME) \
 		 $(FEDERATED_AWS_RP_STACK_NAME) \
 		 $(FEDERATED_AWS_RP_CODE_STORAGE_S3_PREFIX) \
-		 "S3BucketName=$(PROD_RP_DATA_STORE_S3_BUCKET_NAME) \
-		 	ClientId=$(PROD_CLIENT_ID) \
+		 "ClientId=$(PROD_CLIENT_ID) \
 		 	DiscoveryUrl=$(PROD_DISCOVERY_URL) \
 		 	CustomDomainName=$(PROD_DOMAIN_NAME) \
 		 	DomainNameZone=$(PROD_DOMAIN_ZONE) \
