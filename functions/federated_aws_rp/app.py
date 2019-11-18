@@ -50,10 +50,11 @@ def pick_role(cookie_header: str, role_arn: str) -> dict:
             discovery_document['jwks'],
             store)
     except AccessDenied as e:
+        logger.error("Access denied : {}".format(e))
         return {
             'statusCode': 403,
             'headers': {'Content-Type': 'text/html'},
-            'body': "Access denied : {}".format(e)}
+            'body': 'Access denied'}
 
 
 # /redirect_uri
@@ -83,10 +84,11 @@ def login(state: str, code: str, cookie_header: str) -> dict:
             raise AccessDenied(
                 '"code_verifier" not found in cookie')
     except AccessDenied as e:
+        logger.error("Access denied : {}".format(e))
         return {
             'statusCode': 403,
             'headers': {'Content-Type': 'text/html'},
-            'body': "Access denied : {}".format(e)}
+            'body': 'Access denied'}
     token = exchange_code_for_token(
         store['code_verifier'],
         discovery_document['token_endpoint'],
@@ -108,10 +110,11 @@ def login(state: str, code: str, cookie_header: str) -> dict:
                 discovery_document['jwks'],
                 token["id_token"])
         except AccessDenied as e:
+            logger.error("Access denied : {}".format(e))
             return {
                 'statusCode': 403,
                 'headers': {'Content-Type': 'text/html'},
-                'body': "Access denied : {}".format(e)}
+                'body': 'Access denied'}
         roles = {
             "roles": []
         }
@@ -243,10 +246,11 @@ def lambda_handler(event: dict, context: dict) -> dict:
             role_arn = query_string_parameters.get('role_arn')
             return pick_role(cookie_header, role_arn)
         else:
+            logger.debug('Path "{}" not found. Event is {}'.format(path, event))
             return {
                 'headers': {'Content-Type': 'text/html'},
                 'statusCode': 404,
-                'body': 'Path "{}" not found. Event is {}'.format(path, event)}
+                'body': 'Path not found'}
     except Exception as e:
         logger.error(str(e))
         logger.error(traceback.format_exc())
