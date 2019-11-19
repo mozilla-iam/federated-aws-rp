@@ -108,7 +108,8 @@ def login(state: str, code: str, cookie_header: str) -> dict:
         try:
             role_map = exchange_token_for_roles(
                 discovery_document['jwks'],
-                token["id_token"])
+                token["id_token"],
+                store.get('cache', True))
         except AccessDenied as e:
             logger.error("Access denied : {}".format(e))
             return {
@@ -153,7 +154,8 @@ def login(state: str, code: str, cookie_header: str) -> dict:
 def redirect_to_idp(
         destination_url: str,
         role_arn: Optional[str] = None,
-        session_duration: Optional[int] = None) -> dict:
+        session_duration: Optional[int] = None,
+        cache: bool = True) -> dict:
     """API Gateway / endpoint which redirects the user to the identity
     provider
 
@@ -161,6 +163,8 @@ def redirect_to_idp(
         be used to tell AWS what the "issuer URL" is that AWS should direct
         the user to when their session expires to have their session refreshed
     :param role_arn: An optional AWS IAM Role ARN
+    :param session_duration: AN optional session duration in seconds
+    :param cache: Whether or not to request a cached role list
     :return: An AWS API Gateway output dictionary for proxy mode
     """
     global discovery_document
@@ -177,7 +181,8 @@ def redirect_to_idp(
         'state': state,
         'code_verifier': code_verifier,
         'destination_url': destination_url,
-        'session_duration': session_duration
+        'session_duration': session_duration,
+        'cache': cache
     }
     if role_arn:
         store['role_arn'] = role_arn
@@ -237,7 +242,10 @@ def lambda_handler(event: dict, context: dict) -> dict:
             session_duration = int(query_string_parameters.get(
                 'session_duration', CONFIG.default_session_duration))
             destination_url = get_destination_url(referer)
-            return redirect_to_idp(destination_url, role_arn, session_duration)
+            cache = query_string_parameters.get(
+                'cache', 'true').lower() == 'true'
+            return redirect_to_idp(
+                destination_url, role_arn, session_duration, cache)
         elif path == '/redirect_uri':
             state = query_string_parameters.get('state')
             code = query_string_parameters.get('code')
@@ -246,7 +254,8 @@ def lambda_handler(event: dict, context: dict) -> dict:
             role_arn = query_string_parameters.get('role_arn')
             return pick_role(cookie_header, role_arn)
         else:
-            logger.debug('Path "{}" not found. Event is {}'.format(path, event))
+            logger.debug(
+                'Path "{}" not found. Event is {}'.format(path, event))
             return {
                 'headers': {'Content-Type': 'text/html'},
                 'statusCode': 404,

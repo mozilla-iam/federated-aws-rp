@@ -10,6 +10,8 @@ class Config:
         self.domain_name = os.getenv('DOMAIN_NAME')
         self.discovery_url = os.getenv('DISCOVERY_URL')
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
+        self.id_token_for_roles_url = os.getenv('ID_TOKEN_FOR_ROLES_URL',
+            'https://roles-and-aliases.security.mozilla.org/roles')
 
         self.bypass_cache = False
         self.default_session_duration = 43200  # 12 hours
@@ -19,8 +21,7 @@ class Config:
         self.redirect_uri = urllib.parse.urlunparse(
             ('https', self.domain_name, self.redirect_uri_path, '', '', ''))
         self.cookie_name = 'federated-aws-rp'
-        self.id_token_for_roles_url = (
-            'https://roles-and-aliases.security.mozilla.org/roles')
+
         self.default_destionation_url = (
             'https://console.aws.amazon.com/console/home')
         self.role_picker_template = Template('''{% block body %}

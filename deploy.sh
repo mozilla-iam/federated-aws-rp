@@ -31,7 +31,7 @@ if ! echo "$result" | grep 'arn:aws:sts' >/dev/null; then
   echo "Error : $result"
   exit 1
 elif ! echo "$result" | grep "$ACCOUNT_ID" >/dev/null; then
-  echo "Unable to access AWS or wrong account"
+  echo "Wrong AWS account : $result"
   exit 1
 elif ! python -c 'import boto3; print(boto3.Session().region_name)' | grep "us-east-1" >/dev/null; then
   echo "Region must be us-east-1 to support CloudFront"

@@ -126,7 +126,8 @@ def exchange_code_for_token(
         json=body).json()
 
 
-def exchange_token_for_roles(jwks: str, id_token: str) -> dict:
+def exchange_token_for_roles(
+        jwks: str, id_token: str, cache: bool = True) -> dict:
     """Call the id_token_for_roles endpoint exchanging a token for a roles
 
     POST an ID token to the id_token_for_roles API endpoint. The API will
@@ -137,14 +138,17 @@ def exchange_token_for_roles(jwks: str, id_token: str) -> dict:
 
     :param jwks: The JSON Web Key Set for the identity provider
     :param id_token: A dictionary containing the encoded ID token
+    :param cache: Whether or not to request a cached role list
     :return: A dictionary containing roles and aliases
     """
     headers = {"Content-Type": "application/json"}
-    body = {"token": id_token, "key": jwks}
+    body = {"token": id_token, "key": jwks, "cache": cache}
     try:
         result = requests.post(
             CONFIG.id_token_for_roles_url, headers=headers, json=body)
-        if result.status_code != requests.codes.ok or "error" in result.json():
+        if (result.status_code != requests.codes.ok
+                or "error" in result.json()
+                or "roles" not in result.json()):
             raise AccessDenied(
                 '{} : {}'.format(result.status_code, result.text))
     except Exception as e:
@@ -167,6 +171,7 @@ def get_api_keys(
     :param id_token: An encoded OIDC ID token
     :param role_arn: An AWS Amazon Resource Name (ARN) of an AWS IAM Role to
                      assume
+    :param session_duration: AN optional session duration in seconds
     :return: A dictionary containing the AWS API keys and session information
     """
     try:
