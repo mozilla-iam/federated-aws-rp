@@ -170,14 +170,19 @@ Resources:
     Properties:
       RestApiId: !Ref AwsFederatedRpApi
       StageName: DummyStage
-      # Note This property is required by API Gateway. We recommend that you
+      # Deployment with an Empty Embedded Stage
+      # The following instructional text is no longer present in the AWS
+      # documentation for AWS::ApiGateway::Deployment StageName and it's not
+      # clear if it still applies.
+      #
+      # "Note This property is required by API Gateway. We recommend that you
       # specify a name using any value (see Examples) and that you don’t use
       # this stage. We recommend not using this stage because it is tied to
       # this deployment, which means you can’t delete one without deleting the
       # other. For example, if you delete this deployment, API Gateway also
       # deletes this stage, which you might want to keep. Instead, use the
       # AWS::ApiGateway::Stage resource to create and associate a stage with
-      # this deployment.
+      # this deployment."
   AwsFederatedRpResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -192,6 +197,7 @@ Resources:
       HttpMethod: GET
       Integration:
         Type: AWS_PROXY
+        # IntegrationHttpMethod is POST regardless of the HttpMethod for this resource
         # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#set-up-lambda-proxy-integration-using-cli
         # "For Lambda integrations, you must use the HTTP method of POST for the
         # integration request, according to the specification of the Lambda service
@@ -202,6 +208,8 @@ Resources:
       RestApiId: !Ref AwsFederatedRpApi
   AwsFederatedRpRootRequest:
     # This resource is necessary to get API Gateway to respond to requests for the '/' path
+    # Without it API Gateway will respond to requests for '/' with the error
+    # {"message":"Missing Authentication Token"}
     # https://stackoverflow.com/q/46578615/168874
     # https://stackoverflow.com/q/52909329/168874
     DependsOn: AwsFederatedRpLambdaPermission
@@ -211,12 +219,14 @@ Resources:
       HttpMethod: GET
       Integration:
         Type: AWS_PROXY
+        # IntegrationHttpMethod is POST regardless of the HttpMethod for this resource
         # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#set-up-lambda-proxy-integration-using-cli
         # "For Lambda integrations, you must use the HTTP method of POST for the
         # integration request, according to the specification of the Lambda service
         # action for function invocations."
         IntegrationHttpMethod: POST
         Uri: !Join [ '', [ 'arn:aws:apigateway:', !Ref 'AWS::Region', ':lambda:path/2015-03-31/functions/', !GetAtt 'AwsFederatedRpFunction.Arn', '/invocations' ] ]
+      # ResourceId must use the RootResourceId attribute of the AWS::ApiGateway::RestApi
       # https://stackoverflow.com/a/56121914/168874
       ResourceId: !GetAtt AwsFederatedRpApi.RootResourceId
       RestApiId: !Ref AwsFederatedRpApi
