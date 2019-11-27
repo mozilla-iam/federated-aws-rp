@@ -33,21 +33,28 @@ if ! echo "$result" | grep 'arn:aws:sts' >/dev/null; then
 elif ! echo "$result" | grep "$ACCOUNT_ID" >/dev/null; then
   echo "Wrong AWS account : $result"
   exit 1
-elif ! python -c 'import boto3; print(boto3.Session().region_name)' | grep "us-east-1" >/dev/null; then
-  echo "Region must be us-east-1 to support CloudFront"
-  echo "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html#https-requirements-aws-region"
-  exit 1
 fi
 set -e
 
 # This tempfile is required because of https://github.com/aws/aws-cli/issues/2504
 TMPFILE=$(mktemp --suffix .yaml)
 TMPDIR=$(mktemp --directory)
+VIRTUALENV=$(mktemp --directory)
 TARGET_PATH="`dirname \"${TEMPLATE_FILENAME}\"`"
 ln --no-dereference --force --symbolic $TMPDIR "${TARGET_PATH}/build"
-trap "{ rm --verbose --force $TMPFILE;rm --force --recursive $TMPDIR;rm --verbose --force \"${TARGET_PATH}/build\"; }" EXIT
+trap "{ rm --verbose --force $TMPFILE;rm --force --recursive $TMPDIR;rm --force --recursive ${VIRTUALENV};rm --verbose --force \"${TARGET_PATH}/build\"; }" EXIT
 
-pip install --target "${TARGET_PATH}/build/" -r "${TARGET_PATH}/requirements.txt"
+virtualenv --python=python3 ${VIRTUALENV}
+${VIRTUALENV}/bin/pip install boto3
+set +e
+if ! ${VIRTUALENV}/bin/python -c 'import boto3; print(boto3.Session().region_name)' | grep "us-east-1" >/dev/null; then
+  echo "Region must be us-east-1 to support CloudFront"
+  echo "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html#https-requirements-aws-region"
+  exit 1
+fi
+set -e
+
+${VIRTUALENV}/bin/pip install --target "${TARGET_PATH}/build/" -r "${TARGET_PATH}/requirements.txt"
 # https://unix.stackexchange.com/a/180987/22701
 cp --verbose --recursive "${TARGET_PATH}/functions/." "${TARGET_PATH}/build/"
 
@@ -66,6 +73,7 @@ else
 fi
 
 set +e
+date
 if aws cloudformation deploy --template-file $TMPFILE --stack-name $STACK_NAME \
     --capabilities CAPABILITY_IAM \
     --parameter-overrides \
@@ -75,6 +83,7 @@ if aws cloudformation deploy --template-file $TMPFILE --stack-name $STACK_NAME \
     if [ "$OUTPUT_VAR_NAME" ]; then
       aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='${OUTPUT_VAR_NAME}'].OutputValue" --output text
     fi
+    date
     exit 0
   fi
 fi
