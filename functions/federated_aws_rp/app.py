@@ -19,6 +19,7 @@ from .utils import (
     exchange_code_for_token,
     exchange_token_for_roles,
     redirect_to_web_console,
+    trigger_group_role_map_rebuild
 )
 
 logger = logging.getLogger()
@@ -98,6 +99,14 @@ def login(state: str, code: str, cookie_header: str) -> dict:
         key=discovery_document['jwks'],
         audience=CONFIG.client_id)
     store['id_token'] = token['id_token']
+    return store
+
+
+def login_to_web_console(store):
+    global discovery_document
+    if 'discovery_document' not in globals():
+        logger.debug('Fetching discovery document')
+        discovery_document = get_discovery_document(CONFIG.discovery_url)
 
     if 'role_arn' in store:
         return redirect_to_web_console(
@@ -108,7 +117,7 @@ def login(state: str, code: str, cookie_header: str) -> dict:
         try:
             role_map = exchange_token_for_roles(
                 discovery_document['jwks'],
-                token["id_token"],
+                store['id_token'],
                 store.get('cache', True))
         except AccessDenied as e:
             logger.error("Access denied : {}".format(e))
@@ -150,15 +159,45 @@ def login(state: str, code: str, cookie_header: str) -> dict:
     return response
 
 
+def group_role_map_rebuild(store):
+    global discovery_document
+    if 'discovery_document' not in globals():
+        logger.debug('Fetching discovery document')
+        discovery_document = get_discovery_document(CONFIG.discovery_url)
+    try:
+        result = trigger_group_role_map_rebuild(
+            discovery_document['jwks'],
+            store['id_token'])
+    except AccessDenied as e:
+        logger.error("Access denied : {}".format(e))
+        return {
+            'statusCode': 403,
+            'headers': {'Content-Type': 'text/html'},
+            'body': 'Access denied'}
+    if 'error' in result:
+        body = result['error']
+    else:
+        body = 'Success'
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'text/html',
+            'Cache-Control': 'max-age=0'
+        },
+        'body': body}
+
+
 # /
 def redirect_to_idp(
-        destination_url: str,
+        action: str,
+        destination_url: Optional[str] = None,
         role_arn: Optional[str] = None,
         session_duration: Optional[int] = None,
         cache: bool = True) -> dict:
     """API Gateway / endpoint which redirects the user to the identity
     provider
 
+    :param action: What to do after authenticating to the identity provider
     :param destination_url: The URL to store in the cookie which will later
         be used to tell AWS what the "issuer URL" is that AWS should direct
         the user to when their session expires to have their session refreshed
@@ -178,12 +217,14 @@ def redirect_to_idp(
         code_verifier.encode()).digest())
     state = base64_without_padding(os.urandom(32))
     store = {
+        'action': action,
         'state': state,
         'code_verifier': code_verifier,
-        'destination_url': destination_url,
         'session_duration': session_duration,
         'cache': cache
     }
+    if destination_url:
+        store['destination_url'] = destination_url
     if role_arn:
         store['role_arn'] = role_arn
 
@@ -241,15 +282,26 @@ def lambda_handler(event: dict, context: dict) -> dict:
             role_arn = get_role_arn(query_string_parameters)
             session_duration = int(query_string_parameters.get(
                 'session_duration', CONFIG.default_session_duration))
+            action = query_string_parameters.get(
+                'action', 'aws-web-console')
             destination_url = get_destination_url(referer)
             cache = query_string_parameters.get(
                 'cache', 'true').lower() == 'true'
             return redirect_to_idp(
-                destination_url, role_arn, session_duration, cache)
+                action,
+                destination_url,
+                role_arn,
+                session_duration,
+                cache)
         elif path == '/redirect_uri':
             state = query_string_parameters.get('state')
             code = query_string_parameters.get('code')
-            return login(state, code, cookie_header)
+            store = login(state, code, cookie_header)
+            logger.debug('Action is {}'.format(store.get('action')))
+            if store.get('action') == 'aws-web-console':
+                return login_to_web_console(store)
+            elif store.get('action') == 'rebuild-group-role-map':
+                return group_role_map_rebuild(store)
         elif path == '/pick_role':
             role_arn = query_string_parameters.get('role_arn')
             return pick_role(cookie_header, role_arn)

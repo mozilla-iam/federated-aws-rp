@@ -158,6 +158,27 @@ def exchange_token_for_roles(
     return result.json()
 
 
+def trigger_group_role_map_rebuild(jwks: str, id_token: str) -> dict:
+    """Initiate a rebuild of the group role map
+
+    :param jwks: The JSON Web Key Set for the identity provider
+    :param id_token: A dictionary containing the encoded ID token
+    :return: A dictionary indicating the result of the request
+    """
+    headers = {"Content-Type": "application/json"}
+    body = {"token": id_token, "key": jwks}
+    url = "{}rebuild-group-role-map".format(CONFIG.id_token_for_roles_url)
+    logger.debug('POSTing {} to {} with headers {}'.format(body, url, headers))
+    result = requests.post(
+        url, headers=headers, json=body)
+    logger.debug('POSTed {} to {} with headers {}'.format(body, url, result.request.headers))
+    if (result.status_code != requests.codes.ok
+            or "error" in result.json()):
+        raise AccessDenied(
+            '{} : {}'.format(result.status_code, result.text))
+    return result.json()
+
+
 def get_api_keys(
         jwks: str,
         id_token: str,
