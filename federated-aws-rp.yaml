@@ -15,6 +15,10 @@ Metadata:
       - CustomDomainName
       - DomainNameZone
       - CertificateArn
+    - Label:
+        default: Services
+      Parameters:
+        - IdTokenForRolesUrl
     ParameterLabels:
       ClientId:
         default: Client ID issued by the identity provider
@@ -26,6 +30,8 @@ Metadata:
         default: DNS Zone containing the Custom DNS Domain Name
       CertificateArn:
         default: AWS ACM Certificate ARN for the Custom DNS Domain Name
+      IdTokenForRolesUrl:
+        default: The URL of the ID Token for Roles API
 Parameters:
   ClientId:
     Type: String
@@ -49,6 +55,9 @@ Parameters:
     Type: String
     Description: The ARN of the AWS ACM Certificate for your custom domain name
     Default: ''
+  IdTokenForRolesUrl:
+    Type: String
+    Description: The URL of the ID Token for Roles API
 Conditions:
   UseCustomDomainName: !Not [ !Equals [ !Ref 'CustomDomainName', '' ] ]
 Rules:
@@ -101,6 +110,7 @@ Resources:
           DISCOVERY_URL: !Ref DiscoveryUrl
           DOMAIN_NAME: !Ref CustomDomainName  # What if a domain name isn't provided?
           LOG_LEVEL: INFO
+          ID_TOKEN_FOR_ROLES_URL: !Ref IdTokenForRolesUrl
       Handler: federated_aws_rp.app.lambda_handler
       Runtime: python3.7
       Role: !GetAtt AwsFederatedRpFunctionRole.Arn

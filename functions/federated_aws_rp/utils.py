@@ -143,9 +143,10 @@ def exchange_token_for_roles(
     """
     headers = {"Content-Type": "application/json"}
     body = {"token": id_token, "key": jwks, "cache": cache}
+    url = "{}roles".format(CONFIG.id_token_for_roles_url)
     try:
         result = requests.post(
-            CONFIG.id_token_for_roles_url, headers=headers, json=body)
+            url, headers=headers, json=body)
         if (result.status_code != requests.codes.ok
                 or "error" in result.json()
                 or "roles" not in result.json()):
