@@ -15,6 +15,10 @@ Metadata:
       - CustomDomainName
       - DomainNameZone
       - CertificateArn
+    - Label:
+        default: Services
+      Parameters:
+        - IdTokenForRolesUrl
     ParameterLabels:
       ClientId:
         default: Client ID issued by the identity provider
@@ -26,6 +30,8 @@ Metadata:
         default: DNS Zone containing the Custom DNS Domain Name
       CertificateArn:
         default: AWS ACM Certificate ARN for the Custom DNS Domain Name
+      IdTokenForRolesUrl:
+        default: The URL of the ID Token for Roles API
 Parameters:
   ClientId:
     Type: String
@@ -38,6 +44,9 @@ Parameters:
     Type: String
     Description: The custom domain name to use for the API
     Default: ''
+    # AWS::ApiGateway::DomainName can not contain any uppercase characters
+    AllowedPattern: '^[^A-Z]*$'
+    ConstraintDescription: must not contain any uppercase characters
   DomainNameZone:
     Type: String
     Description: The Route53 DNS zone containing the custom domain name
@@ -46,6 +55,9 @@ Parameters:
     Type: String
     Description: The ARN of the AWS ACM Certificate for your custom domain name
     Default: ''
+  IdTokenForRolesUrl:
+    Type: String
+    Description: The URL of the ID Token for Roles API
 Conditions:
   UseCustomDomainName: !Not [ !Equals [ !Ref 'CustomDomainName', '' ] ]
 Rules:
@@ -98,6 +110,7 @@ Resources:
           DISCOVERY_URL: !Ref DiscoveryUrl
           DOMAIN_NAME: !Ref CustomDomainName  # What if a domain name isn't provided?
           LOG_LEVEL: INFO
+          ID_TOKEN_FOR_ROLES_URL: !Ref IdTokenForRolesUrl
       Handler: federated_aws_rp.app.lambda_handler
       Runtime: python3.7
       Role: !GetAtt AwsFederatedRpFunctionRole.Arn
@@ -137,6 +150,43 @@ Resources:
       EndpointConfiguration:
         Types:
           - REGIONAL
+  AwsFederatedRpApiGatewayDomainName:
+    # The ApiGateway requires a custom domain name, despite sitting behind
+    # CloudFront. This is because we want to pass all ( * ) HTTP headers
+    # through CloudFront and onto API Gateway. If we didn't set a custom domain
+    # name on the API Gateway, the "Host" header passed through from CloudFront
+    # to API Gateway would be for the custom domain, but API Gateway, which uses
+    # SNI, wouldn't know which TLS certificate to use in the handshake because
+    # API Gateway would have no record of that Host header. This would result in
+    # API Gateway being unable to setup a TLS connection with the inbound
+    # CloudFront connection attempt, API Gateway writing no logs about this
+    # fact, and CloudFront returning to the user an error of
+    # {"message":"Forbidden"}
+    # If we weren't passing the "Host" header from CloudFront to API Gateway
+    # this resource wouldn't be needed
+    Type: AWS::ApiGateway::DomainName
+    Properties:
+      # Uppercase letters are not supported in DomainName
+      DomainName: !Ref CustomDomainName
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      RegionalCertificateArn: !Ref CertificateArn
+      SecurityPolicy: TLS_1_2
+      Tags:
+        - Key: application
+          Value: federated-aws-rp
+        - Key: stack
+          Value: !Ref AWS::StackName
+        - Key: source
+          Value: https://github.com/mozilla-iam/federated-aws-rp/
+  AwsFederatedRpBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Properties:
+      # BasePath:   # Not specifying this so that we have no base path
+      DomainName: !Ref AwsFederatedRpApiGatewayDomainName
+      RestApiId: !Ref AwsFederatedRpApi
+      Stage: !Ref AwsFederatedRpApiStage
   AwsFederatedRpLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -251,10 +301,7 @@ Resources:
               Forward: all
             QueryString: true
             Headers:
-              # Explicity requesting that "Referer" be passed through because we need it and there doesn't seem
-              # to be a way to request that all headers be passed through
-              # https://gist.github.com/gene1wood/c0249066d2562e410ddecd8a6fee8306
-              - Referer
+              - '*'
           TargetOriginId: AwsFederatedRpCloudFrontOriginId
           ViewerProtocolPolicy: redirect-to-https
         # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-distributionconfig.html#cfn-cloudfront-distribution-distributionconfig-defaultrootobject
@@ -269,9 +316,9 @@ Resources:
               OriginProtocolPolicy: https-only
               OriginSSLProtocols:
                 - TLSv1.2
-            DomainName: !Join [ '.', [ !Ref 'AwsFederatedRpApi', 'execute-api', !Ref 'AWS::Region', 'amazonaws.com' ] ]
+            DomainName: !GetAtt AwsFederatedRpApiGatewayDomainName.RegionalDomainName
             Id: AwsFederatedRpCloudFrontOriginId
-            OriginPath: !Join [ '', [ '/', !Ref 'AwsFederatedRpApiStage' ] ]
+            # OriginPath: !Join [ '', [ '/', !Ref 'AwsFederatedRpApiStage' ] ]
         PriceClass: PriceClass_100  # US, Canada, Europe, Israel
         ViewerCertificate:
           AcmCertificateArn: !Ref CertificateArn
@@ -292,3 +339,12 @@ Outputs:
         - UseCustomDomainName
         - !Join [ '', [ 'https://', !Ref 'CustomDomainName', '/'] ]
         - !Join [ '', [ 'https://', !Ref 'AwsFederatedRpApi', '.execute-api.', !Ref 'AWS::Region', '.amazonaws.com/', !Ref 'AwsFederatedRpApiStage', '/' ] ]
+  RegionalDomainName:
+    Description: AwsFederatedRpApiGatewayDomainName.RegionalDomainName
+    Value: !GetAtt AwsFederatedRpApiGatewayDomainName.RegionalDomainName
+  RegionalHostedZoneId:
+    Description: AwsFederatedRpApiGatewayDomainName.RegionalHostedZoneId
+    Value: !GetAtt AwsFederatedRpApiGatewayDomainName.RegionalHostedZoneId
+  AwsFederatedRpApiGatewayDomainNameRef:
+    Description: Ref AwsFederatedRpApiGatewayDomainName
+    Value: !Ref AwsFederatedRpApiGatewayDomainName
