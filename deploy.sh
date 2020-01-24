@@ -44,7 +44,7 @@ TARGET_PATH="`dirname \"${TEMPLATE_FILENAME}\"`"
 ln --no-dereference --force --symbolic $TMPDIR "${TARGET_PATH}/build"
 trap "{ rm --verbose --force $TMPFILE;rm --force --recursive $TMPDIR;rm --force --recursive ${VIRTUALENV};rm --verbose --force \"${TARGET_PATH}/build\"; }" EXIT
 
-virtualenv --python=python3 ${VIRTUALENV}
+virtualenv --python=python3.8 ${VIRTUALENV}
 ${VIRTUALENV}/bin/pip install boto3
 set +e
 if ! ${VIRTUALENV}/bin/python -c 'import boto3; print(boto3.Session().region_name)' | grep "us-east-1" >/dev/null; then

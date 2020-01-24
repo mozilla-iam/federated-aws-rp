@@ -112,7 +112,7 @@ Resources:
           LOG_LEVEL: INFO
           ID_TOKEN_FOR_ROLES_URL: !Ref IdTokenForRolesUrl
       Handler: federated_aws_rp.app.lambda_handler
-      Runtime: python3.7
+      Runtime: python3.8
       Role: !GetAtt AwsFederatedRpFunctionRole.Arn
       Tags:
         - Key: application
