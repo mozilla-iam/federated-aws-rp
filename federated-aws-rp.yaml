@@ -147,6 +147,11 @@ Resources:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Name: AwsFederatedRp
+      # https://forums.aws.amazon.com/message.jspa?messageID=773429
+      BinaryMediaTypes:
+        # Despite what the AWS documentation says, this value should *not* be '*~1*' as that doesn't work
+        # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apigateway-restapi.html#cfn-apigateway-restapi-binarymediatypes
+        - '*/*'
       Description: AWS Federated login website / relying party
       FailOnWarnings: true
       EndpointConfiguration:
@@ -258,6 +263,22 @@ Resources:
         Uri: !Join [ '', [ 'arn:aws:apigateway:', !Ref 'AWS::Region', ':lambda:path/2015-03-31/functions/', !GetAtt 'AwsFederatedRpFunction.Arn', '/invocations' ] ]
       ResourceId: !Ref AwsFederatedRpResource
       RestApiId: !Ref AwsFederatedRpApi
+  AwsFederatedRpPOSTRequest:
+    DependsOn: AwsFederatedRpLambdaPermission
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        Type: AWS_PROXY
+        # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#set-up-lambda-proxy-integration-using-cli
+        # "For Lambda integrations, you must use the HTTP method of POST for the
+        # integration request, according to the specification of the Lambda service
+        # action for function invocations."
+        IntegrationHttpMethod: POST
+        Uri: !Join [ '', [ 'arn:aws:apigateway:', !Ref 'AWS::Region', ':lambda:path/2015-03-31/functions/', !GetAtt 'AwsFederatedRpFunction.Arn', '/invocations' ] ]
+      ResourceId: !Ref AwsFederatedRpResource
+      RestApiId: !Ref AwsFederatedRpApi
   AwsFederatedRpRootRequest:
     # This resource is necessary to get API Gateway to respond to requests for the '/' path
     # Without it API Gateway will respond to requests for '/' with the error
@@ -292,8 +313,13 @@ Resources:
         Comment: !Join [ ':', [!Ref 'AWS::StackName', 'AWS Federated RP CloudFront distribution']]
         DefaultCacheBehavior:
           AllowedMethods:
-            - GET
-            - HEAD
+          - GET
+          - HEAD
+          - POST
+          - DELETE
+          - OPTIONS
+          - PUT
+          - PATCH
           Compress: true
           DefaultTTL: 0
           MinTTL: 0

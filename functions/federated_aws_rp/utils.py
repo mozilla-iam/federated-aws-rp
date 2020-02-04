@@ -4,6 +4,7 @@ import logging
 import urllib.parse
 import http.cookies
 from typing import Optional
+import importlib.resources
 
 from jose import jwt
 import requests
@@ -53,7 +54,7 @@ def get_store(cookie_header: str) -> dict:
     if CONFIG.cookie_name in cookies:
         try:
             return json.loads(cookies[CONFIG.cookie_name].value)
-        except Exception:
+        except json.JSONDecodeError:
             logger.error('Unable to parse  JSON from "{}"'.format(
                 cookies[CONFIG.cookie_name].value
             ))
@@ -62,18 +63,22 @@ def get_store(cookie_header: str) -> dict:
         return {}
 
 
-def get_discovery_document(discovery_url: str) -> dict:
+def get_discovery_document() -> dict:
     """Fetch the OIDC discovery document and enrich it with the JWKS
 
-    Fetch the the discovery_url and parse it into a dictionary. Fetch the
-    content of the jwks_uri and add it to the dictionary in the "jkws" key
+    If the discovery_document is not available in AWS Lambda cache, fetch the
+    CONFIG.discovery_url and parse it into a dictionary. Fetch the content of
+    the jwks_uri and add it to the dictionary in the "jkws" key
 
-    :param discovery_url: The URL of the identity providers OIDC discovery url
     :return: A dictionary containing information about the identity provider
     """
-    result = requests.get(discovery_url).json()
-    result['jwks'] = requests.get(result['jwks_uri']).json()
-    return result
+    global discovery_document
+    if 'discovery_document' not in globals():
+        logger.debug('Fetching discovery document')
+        discovery_document = requests.get(CONFIG.discovery_url).json()
+        discovery_document['jwks'] = requests.get(
+            discovery_document['jwks_uri']).json()
+    return discovery_document
 
 
 def get_role_arn(query_string_parameters: dict) -> Optional[str]:
@@ -154,12 +159,17 @@ def exchange_token_for_roles(
                 '{} : {}'.format(result.status_code, result.text))
     except Exception as e:
         raise AccessDenied(
-            "Unable to exchange ID token for list of roles : {}".format(e))
+            "Unable to exchange ID token for list of roles calling {} with "
+            "payload {} : {}".format(url, body, e))
     return result.json()
 
 
 def trigger_group_role_map_rebuild(jwks: str, id_token: str) -> dict:
     """Initiate a rebuild of the group role map
+
+    Call the "rebuild-group-role-map" API endpoint for the id_token_for_role
+    API which triggers scanning AWS accounts for IAM roles and producing an
+    updated user group to IAM Role map
 
     :param jwks: The JSON Web Key Set for the identity provider
     :param id_token: A dictionary containing the encoded ID token
@@ -169,13 +179,22 @@ def trigger_group_role_map_rebuild(jwks: str, id_token: str) -> dict:
     body = {"token": id_token, "key": jwks}
     url = "{}rebuild-group-role-map".format(CONFIG.id_token_for_roles_url)
     logger.debug('POSTing {} to {} with headers {}'.format(body, url, headers))
-    result = requests.post(
-        url, headers=headers, json=body)
-    logger.debug('POSTed {} to {} with headers {}'.format(body, url, result.request.headers))
-    if (result.status_code != requests.codes.ok
-            or "error" in result.json()):
+    try:
+        result = requests.post(
+            url, headers=headers, json=body)
+        logger.debug('POSTed {} to {} with headers {}'.format(
+            body, url, result.request.headers))
+        result.raise_for_status()
+    except requests.exceptions.RequestException as e:
         raise AccessDenied(
-            '{} : {}'.format(result.status_code, result.text))
+            '{} : {}'.format(
+                getattr(e.response, 'status_code', None),
+                getattr(e.response, 'text', None)
+            ))
+
+    if 'error' in result.json():
+        raise AccessDenied(result.json()['error'])
+
     return result.json()
 
 
@@ -311,9 +330,9 @@ def get_destination_url(referer: str) -> str:
         return CONFIG.default_destionation_url
 
 
-def redirect_to_web_console(
+def get_aws_federation_url(
         jwks: str,
-        store: dict) -> dict:
+        store: dict) -> str:
     """Given an ID token and IAM Role return a AWS API Gateway redirect to AWS
 
     Use the ID token and IAM Role ARN to fetch temporary AWS API keys from STS
@@ -343,16 +362,195 @@ def redirect_to_web_console(
         ('https', CONFIG.domain_name, '/', '', issuer_url_query, ''))
     url = get_signin_url(credentials, issuer_url, store.get('destination_url'))
     # TODO : handle requests failures
-    response = {
-        'statusCode': 302,
-        'headers': {
-            'Content-Type': 'text/html',
-            'Cache-Control': 'max-age=0',
-            'Location': url,
-            'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600'.format(
-                CONFIG.cookie_name,
-                encode_cookie_value(store))
+    return url
+
+
+def login(
+        oidc_state: str,
+        code: str,
+        error: Optional[str],
+        error_description: Optional[str],
+        cookie_header: str) -> str:
+    """Given an oidc_state and code, exchange them for an OIDC ID token
+
+    Validate the oidc_state matches the oidc_state stored in the cookie store.
+    Call exchange_code_for_token to get an ID token. Add the id_token to the
+    store and return the store
+
+    :param oidc_state: OIDC state value returned from the IdP
+    :param code: OIDC code returned from the IdP
+    :param error: Error code returned from the IdP
+    :param error_description: Error description returned from the IdP
+    :param cookie_header: HTTP header cookies sent by the user
+    :return: An ID token
+    """
+    discovery_document = get_discovery_document()
+    if error is not None:
+        raise AccessDenied('Identity provider returned error : {}'.format(
+            error_description))
+    elif oidc_state is None:
+        raise AccessDenied('"state" query parameter is missing"')
+    elif code is None:
+        raise AccessDenied('"code" query parameter is missing')
+
+    store = get_store(cookie_header)
+    if store.get('oidc_state') != oidc_state:
+        raise AccessDenied('Invalid "state" query parameter passed')
+    elif 'code_verifier' not in store:
+        raise AccessDenied(
+            '"code_verifier" not found in cookie')
+
+    # TODO : wrap in try except, raise AccessDenied if there's a problem
+    token = exchange_code_for_token(
+        store['code_verifier'],
+        discovery_document['token_endpoint'],
+        code)
+    if 'id_token' not in token:
+        raise AccessDenied('Bad response from token endpoint : {}'.format(
+            token))
+    jwt.decode(
+        token=token['id_token'],
+        key=discovery_document['jwks'],
+        audience=CONFIG.client_id)
+
+    return token['id_token']
+
+
+def get_roles(id_token: str, cache: bool) -> dict:
+    """Fetch the role_map using an ID token and return it grouped and sorted
+
+    :param id_token: The OIDC ID token
+    :param cache: Whether or not to request a cached group role map
+    :return: dictionary of the Group Role Map
+    """
+    discovery_document = get_discovery_document()
+    try:
+        role_map = exchange_token_for_roles(
+            discovery_document['jwks'],
+            id_token,
+            cache)
+    except AccessDenied as e:
+        logger.error("Access denied : {}".format(e))
+        return {}
+    roles = {}  # type: dict
+    for arn in role_map["roles"]:
+        account_id = arn.split(":")[4]
+        alias = role_map.get(
+            "aliases", {}).get(account_id, [account_id])[0]
+        name = arn.split(':')[5].split('/')[-1]
+        role = {
+            "alias": alias,
+            "arn": arn,
+            "id": account_id,
+            "role": name
+        }
+
+        if alias in roles:
+            roles[alias].append(role)
+        else:
+            roles[alias] = [role]
+
+    # Sort the list by role name
+    for alias in roles:
+        roles[alias] = sorted(roles[alias], key=lambda x: x['role'])
+
+    return roles
+
+
+def convert_account_alias(
+        role_arn: str,
+        id_token: str,
+        cache: bool) -> Optional[str]:
+    """Given a role_arn with an AWS account alias in place of the account ID
+    convert the alias to an account ID and return the modified role ARN
+
+    :param role_arn: String of a AWS IAM Role ARN with an alias in place of
+        the account ID
+    :param id_token: String of OIDC ID token
+    :param cache: Boolean of whether or not to use cached values
+    :return: String of an AWS IAM Role ARN or None
+    """
+    if len(role_arn.split(':')) != 6:
+        logger.error('Invalid role_arn : {}'.format(role_arn))
+        return None
+    role_arn_elements = role_arn.split(':')
+    alias = role_arn_elements[4]
+    if alias.isdigit() and len(alias) == 12:
+        logger.debug(
+            'role_arn does not require an alias lookup as {} is an account ID '
+            'not an alias'.format(alias))
+        return role_arn
+    discovery_document = get_discovery_document()
+    try:
+        role_map = exchange_token_for_roles(
+            discovery_document['jwks'],
+            id_token,
+            cache)
+    except AccessDenied as e:
+        logger.error("Access denied : {}".format(e))
+        return None
+    for account_id in role_map.get('aliases', {}):
+        if alias in role_map['aliases'][account_id]:
+            role_arn_elements[4] = account_id
+            return ':'.join(role_arn_elements)
+    logger.error('No AWS account found for alias "{}"'.format(alias))
+    return None
+
+
+def read_resource(
+        path: str,
+        prefix: str = 'federated_aws_rp/static') -> Optional[str]:
+    """Read a file from the filesystem and return it
+
+    :param path: The filename of the file
+    :param prefix: The directory prefix of the file
+    :return: The content of the on disk file
+    """
+    binary_extensions = ['woff', 'woff2']
+    package = '.'.join((prefix + path).split('/')[:-1])
+    name = '.'.join((prefix + path).split('/')[-1:])
+    is_binary = any([name.endswith(x) for x in binary_extensions])
+    # logger.debug('Reading resource package {} name {}'.format(package, name))
+    try:
+        if importlib.resources.is_resource(package, name):
+            read_func = (importlib.resources.read_binary if is_binary
+                         else importlib.resources.read_text)
+            return read_func(package, name)
+        else:
+            return None
+    except (ModuleNotFoundError, FileNotFoundError):
+        return None
+
+
+def return_api_gateway_json(
+        store: dict,
+        body: dict = None,
+        set_cookie: bool = True):
+    """Return an AWS API Gateway AWS_PROXY JSON response
+
+    Given a cookie store, a dictionary payload body and whether or not to set
+    a cookie, construct a valid response dictionary for AWS API Gateway
+
+    :param store: dictionary of the user's cookie store
+    :param body: dictionary to be returned as JSON
+    :param set_cookie: boolean of whether or not to set the cookie store in the
+        response
+    :return: An AWS API Gateway output dictionary for proxy mode
+    """
+    if body is None:
+        body = {}
+    result = {
+        'statusCode': 200,
+        'multiValueHeaders': {
+            'Content-Type': ['application/json'],
+            'Cache-Control': ['max-age=0']
         },
-        'body': 'Redirecting to AWS Web Console'
+        'body': json.dumps(body)
     }
-    return response
+    if set_cookie:
+        result['multiValueHeaders']['Set-Cookie'] = [
+            '{}={}; Secure; HttpOnly; Path=/; Max-Age=3600; '
+            'SameSite=strict'.format(
+                CONFIG.cookie_name,
+                encode_cookie_value(store))]
+    return result
