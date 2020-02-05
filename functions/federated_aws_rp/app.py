@@ -90,7 +90,8 @@ def handle_oidc_redirect_callback(cookie_header: str, body: dict) -> dict:
     discovery_document = get_discovery_document()
     store = get_store(cookie_header)
     try:
-        logger.debug('/redirect_callback called with body {}'.format(body))
+        logger.debug('/redirect_callback called with body {}'.format(
+            json.dumps(body)))
         store['id_token'] = login(
             body.get('state'),
             body.get('code'),
