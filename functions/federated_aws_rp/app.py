@@ -353,6 +353,9 @@ def lambda_handler(event: dict, context: dict) -> dict:
                 for extension in content_type_map:
                     if path.endswith(extension):
                         content_type = content_type_map[extension]
+                # If the body is binary (bytes) we'll need to base64 encode it
+                # before sending it to API Gateway. We also need to set
+                # isBase64Encoded to True so API Gateway knows it's encoded.
                 is_base64_encoded = type(body) == bytes
                 return {
                     'headers': {'Content-Type': content_type},
