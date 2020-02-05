@@ -1,14 +1,14 @@
 import base64
+import http.cookies
+import importlib.resources
 import json
 import logging
 import urllib.parse
-import http.cookies
 from typing import Optional
-import importlib.resources
 
-from jose import jwt
-import requests
 import boto3
+import requests
+from jose import jwt
 
 from .config import CONFIG
 

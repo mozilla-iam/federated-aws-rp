@@ -1,10 +1,10 @@
-import os
-import hashlib
-import logging
-import traceback
-import json
 import base64
+import hashlib
+import json
+import logging
+import os
 import time
+import traceback
 import urllib.parse
 from typing import Optional
 
@@ -12,18 +12,18 @@ from .config import CONFIG
 from .utils import (
     AccessDenied,
     base64_without_padding,
-    get_store,
-    get_discovery_document,
-    get_destination_url,
-    get_role_arn,
+    convert_account_alias,
     encode_cookie_value,
     get_aws_federation_url,
-    trigger_group_role_map_rebuild,
-    login,
+    get_destination_url,
+    get_discovery_document,
+    get_role_arn,
     get_roles,
+    get_store,
+    login,
     read_resource,
     return_api_gateway_json,
-    convert_account_alias
+    trigger_group_role_map_rebuild,
 )
 
 logger = logging.getLogger()
