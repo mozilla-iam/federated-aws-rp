@@ -237,7 +237,7 @@ def redirect_to_idp(
             'Content-Type': 'text/html',
             'Cache-Control': 'max-age=0',
             'Set-Cookie': (
-                '{}={}; Secure; HttpOnly; Path=/; Max-Age=3600'.format(
+                '{}={}; Secure; SameSite=Lax; HttpOnly; Path=/; Max-Age=3600'.format(
                     CONFIG.cookie_name,
                     encode_cookie_value(store)))
         },
