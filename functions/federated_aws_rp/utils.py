@@ -523,18 +523,15 @@ def read_resource(
 
 
 def return_api_gateway_json(
-        store: dict,
-        body: dict = None,
-        set_cookie: bool = True):
+        store: Optional[dict],
+        body: dict = None):
     """Return an AWS API Gateway AWS_PROXY JSON response
 
-    Given a cookie store, a dictionary payload body and whether or not to set
-    a cookie, construct a valid response dictionary for AWS API Gateway
+    Given a cookie store and a dictionary payload body, construct a valid
+    response dictionary for AWS API Gateway.
 
     :param store: dictionary of the user's cookie store
     :param body: dictionary to be returned as JSON
-    :param set_cookie: boolean of whether or not to set the cookie store in the
-        response
     :return: An AWS API Gateway output dictionary for proxy mode
     """
     if body is None:
@@ -547,7 +544,7 @@ def return_api_gateway_json(
         },
         'body': json.dumps(body)
     }
-    if set_cookie:
+    if store is not None:
         result['multiValueHeaders']['Set-Cookie'] = [
             '{}={}; Secure; HttpOnly; Path=/; Max-Age=3600; '
             'SameSite=strict'.format(

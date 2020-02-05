@@ -147,15 +147,12 @@ def get_state(store: dict) -> dict:
     :param store: The contents of the cookie store
     :return: An AWS API Gateway output dictionary for proxy mode
     """
-    # Update the last time state was checked
-    store['last_state_check'] = time.time()
     return return_api_gateway_json(
-        store,
+        None,
         {
             'state': store.get('client_workflow_state'),
             'value': store.get('client_workflow_value')
-        },
-        False
+        }
     )
 
 
