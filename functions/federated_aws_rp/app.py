@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import time
 import traceback
@@ -343,17 +344,11 @@ def lambda_handler(event: dict, context: dict) -> dict:
             body = read_resource(path)
             if body:
                 # static resource
-                content_type_map = {
-                    '.js': 'application/javascript',
-                    '.html': 'text/html',
-                    '.css': 'text/css',
+                mimetypes.types_map.update({
                     '.woff': 'application/octet-stream',
                     '.woff2': 'application/octet-stream'
-                }
-                content_type = 'text/html'
-                for extension in content_type_map:
-                    if path.endswith(extension):
-                        content_type = content_type_map[extension]
+                })
+                content_type = mimetypes.guess_type(path)[0]
                 # If the body is binary (bytes) we'll need to base64 encode it
                 # before sending it to API Gateway. We also need to set
                 # isBase64Encoded to True so API Gateway knows it's encoded.
