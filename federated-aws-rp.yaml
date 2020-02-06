@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: Lambda function and API Gateway which allow a user to access the AWS web console via OIDC federated login
+Description: Lambda function and API Gateway which allow a user to access the AWS
+  web console via OIDC federated login
 Metadata:
   Source: https://github.com/mozilla-iam/federated-aws-rp/blob/master/federated-aws-rp.yaml
   'AWS::CloudFormation::Interface':
@@ -18,7 +19,7 @@ Metadata:
     - Label:
         default: Services
       Parameters:
-        - IdTokenForRolesUrl
+      - IdTokenForRolesUrl
     ParameterLabels:
       ClientId:
         default: Client ID issued by the identity provider
@@ -51,6 +52,7 @@ Parameters:
     Type: String
     Description: The Route53 DNS zone containing the custom domain name
     Default: ''
+    # TODO : Add a constraint to ensure this ends in a period (or is blank)
   CertificateArn:
     Type: String
     Description: The ARN of the AWS ACM Certificate for your custom domain name
@@ -80,25 +82,25 @@ Resources:
           Action:
           - sts:AssumeRole
       Policies:
-        - PolicyName: AllowLambdaLogging
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: '*'
-        - PolicyName: AllowAssumeRoleWithWebIdentity
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sts:AssumeRoleWithWebIdentity
-                Resource:
-                  - '*'
+      - PolicyName: AllowLambdaLogging
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+      - PolicyName: AllowAssumeRoleWithWebIdentity
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - sts:AssumeRoleWithWebIdentity
+              Resource:
+                - '*'
   AwsFederatedRpFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -112,15 +114,15 @@ Resources:
           LOG_LEVEL: INFO
           ID_TOKEN_FOR_ROLES_URL: !Ref IdTokenForRolesUrl
       Handler: federated_aws_rp.app.lambda_handler
-      Runtime: python3.7
+      Runtime: python3.8
       Role: !GetAtt AwsFederatedRpFunctionRole.Arn
       Tags:
-        - Key: application
-          Value: federated-aws-rp
-        - Key: stack
-          Value: !Ref AWS::StackName
-        - Key: source
-          Value: https://github.com/mozilla-iam/federated-aws-rp/
+      - Key: application
+        Value: federated-aws-rp
+      - Key: stack
+        Value: !Ref AWS::StackName
+      - Key: source
+        Value: https://github.com/mozilla-iam/federated-aws-rp/
       Timeout: 900
   AwsFederatedRpFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -145,11 +147,16 @@ Resources:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Name: AwsFederatedRp
+      # https://forums.aws.amazon.com/message.jspa?messageID=773429
+      BinaryMediaTypes:
+        # Despite what the AWS documentation says, this value should *not* be '*~1*' as that doesn't work
+        # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apigateway-restapi.html#cfn-apigateway-restapi-binarymediatypes
+        - '*/*'
       Description: AWS Federated login website / relying party
       FailOnWarnings: true
       EndpointConfiguration:
         Types:
-          - REGIONAL
+        - REGIONAL
   AwsFederatedRpApiGatewayDomainName:
     # The ApiGateway requires a custom domain name, despite sitting behind
     # CloudFront. This is because we want to pass all ( * ) HTTP headers
@@ -170,16 +177,16 @@ Resources:
       DomainName: !Ref CustomDomainName
       EndpointConfiguration:
         Types:
-          - REGIONAL
+        - REGIONAL
       RegionalCertificateArn: !Ref CertificateArn
       SecurityPolicy: TLS_1_2
       Tags:
-        - Key: application
-          Value: federated-aws-rp
-        - Key: stack
-          Value: !Ref AWS::StackName
-        - Key: source
-          Value: https://github.com/mozilla-iam/federated-aws-rp/
+      - Key: application
+        Value: federated-aws-rp
+      - Key: stack
+        Value: !Ref AWS::StackName
+      - Key: source
+        Value: https://github.com/mozilla-iam/federated-aws-rp/
   AwsFederatedRpBasePathMapping:
     Type: AWS::ApiGateway::BasePathMapping
     Properties:
@@ -199,10 +206,10 @@ Resources:
     Properties:
       DeploymentId: !Ref AwsFederatedRpApiDeployment
       MethodSettings:
-        - DataTraceEnabled: true
-          HttpMethod: '*'
-          # LoggingLevel: INFO
-          ResourcePath: /*
+      - DataTraceEnabled: true
+        HttpMethod: '*'
+        # LoggingLevel: INFO
+        ResourcePath: /*
       RestApiId: !Ref AwsFederatedRpApi
       Tags:
         - Key: application
@@ -216,7 +223,7 @@ Resources:
   AwsFederatedRpApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
-      - AwsFederatedRpRequest
+    - AwsFederatedRpRequest
     Properties:
       RestApiId: !Ref AwsFederatedRpApi
       StageName: DummyStage
@@ -256,6 +263,22 @@ Resources:
         Uri: !Join [ '', [ 'arn:aws:apigateway:', !Ref 'AWS::Region', ':lambda:path/2015-03-31/functions/', !GetAtt 'AwsFederatedRpFunction.Arn', '/invocations' ] ]
       ResourceId: !Ref AwsFederatedRpResource
       RestApiId: !Ref AwsFederatedRpApi
+  AwsFederatedRpPOSTRequest:
+    DependsOn: AwsFederatedRpLambdaPermission
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        Type: AWS_PROXY
+        # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#set-up-lambda-proxy-integration-using-cli
+        # "For Lambda integrations, you must use the HTTP method of POST for the
+        # integration request, according to the specification of the Lambda service
+        # action for function invocations."
+        IntegrationHttpMethod: POST
+        Uri: !Join [ '', [ 'arn:aws:apigateway:', !Ref 'AWS::Region', ':lambda:path/2015-03-31/functions/', !GetAtt 'AwsFederatedRpFunction.Arn', '/invocations' ] ]
+      ResourceId: !Ref AwsFederatedRpResource
+      RestApiId: !Ref AwsFederatedRpApi
   AwsFederatedRpRootRequest:
     # This resource is necessary to get API Gateway to respond to requests for the '/' path
     # Without it API Gateway will respond to requests for '/' with the error
@@ -286,12 +309,17 @@ Resources:
     Properties:
       DistributionConfig:
         Aliases:
-          - !Ref CustomDomainName
+        - !Ref CustomDomainName
         Comment: !Join [ ':', [!Ref 'AWS::StackName', 'AWS Federated RP CloudFront distribution']]
         DefaultCacheBehavior:
           AllowedMethods:
-            - GET
-            - HEAD
+          - GET
+          - HEAD
+          - POST
+          - DELETE
+          - OPTIONS
+          - PUT
+          - PATCH
           Compress: true
           DefaultTTL: 0
           MinTTL: 0
@@ -301,7 +329,7 @@ Resources:
               Forward: all
             QueryString: true
             Headers:
-              - '*'
+            - '*'
           TargetOriginId: AwsFederatedRpCloudFrontOriginId
           ViewerProtocolPolicy: redirect-to-https
         # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-distributionconfig.html#cfn-cloudfront-distribution-distributionconfig-defaultrootobject
@@ -312,33 +340,33 @@ Resources:
         #Logging:
         #  Logging
         Origins:
-          - CustomOriginConfig:
-              OriginProtocolPolicy: https-only
-              OriginSSLProtocols:
-                - TLSv1.2
-            DomainName: !GetAtt AwsFederatedRpApiGatewayDomainName.RegionalDomainName
-            Id: AwsFederatedRpCloudFrontOriginId
-            # OriginPath: !Join [ '', [ '/', !Ref 'AwsFederatedRpApiStage' ] ]
+        - CustomOriginConfig:
+            OriginProtocolPolicy: https-only
+            OriginSSLProtocols:
+              - TLSv1.2
+          DomainName: !GetAtt AwsFederatedRpApiGatewayDomainName.RegionalDomainName
+          Id: AwsFederatedRpCloudFrontOriginId
+          # OriginPath: !Join [ '', [ '/', !Ref 'AwsFederatedRpApiStage' ] ]
         PriceClass: PriceClass_100  # US, Canada, Europe, Israel
         ViewerCertificate:
           AcmCertificateArn: !Ref CertificateArn
           MinimumProtocolVersion: TLSv1.2_2018
           SslSupportMethod: sni-only
       Tags:
-        - Key: application
-          Value: federated-aws-rp
-        - Key: stack
-          Value: !Ref AWS::StackName
-        - Key: source
-          Value: https://github.com/mozilla-iam/federated-aws-rp/
+      - Key: application
+        Value: federated-aws-rp
+      - Key: stack
+        Value: !Ref AWS::StackName
+      - Key: source
+        Value: https://github.com/mozilla-iam/federated-aws-rp/
 Outputs:
   AwsFederatedRpUrl:
     Description: The URL of the AWS Federated RP
     Value:
       Fn::If:
-        - UseCustomDomainName
-        - !Join [ '', [ 'https://', !Ref 'CustomDomainName', '/'] ]
-        - !Join [ '', [ 'https://', !Ref 'AwsFederatedRpApi', '.execute-api.', !Ref 'AWS::Region', '.amazonaws.com/', !Ref 'AwsFederatedRpApiStage', '/' ] ]
+      - UseCustomDomainName
+      - !Join [ '', [ 'https://', !Ref 'CustomDomainName', '/'] ]
+      - !Join [ '', [ 'https://', !Ref 'AwsFederatedRpApi', '.execute-api.', !Ref 'AWS::Region', '.amazonaws.com/', !Ref 'AwsFederatedRpApiStage', '/' ] ]
   RegionalDomainName:
     Description: AwsFederatedRpApiGatewayDomainName.RegionalDomainName
     Value: !GetAtt AwsFederatedRpApiGatewayDomainName.RegionalDomainName

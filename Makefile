@@ -14,9 +14,27 @@ PROD_ID_TOKEN_FOR_ROLE_URL	:= https://roles-and-aliases.security.mozilla.org/
 DEV_ID_TOKEN_FOR_ROLE_URL	:= https://roles-and-aliases.security.allizom.org/
 PROD_CLIENT_ID		:= N7lULzWtfVUDGymwDs0yDEq6ZcwmFazj
 PROD_DISCOVERY_URL	:= https://auth.mozilla.auth0.com/.well-known/openid-configuration
+DEV_CLIENT_ID		:= xRFzU2bj7Lrbo3875aXwyxIArdkq1AOT
+DEV_DISCOVERY_URL	:= https://auth-dev.mozilla.auth0.com/.well-known/openid-configuration
 
 .PHONE: deploy-aws-federated-rp-dev
 deploy-aws-federated-rp-dev:
+	./deploy.sh \
+		 $(DEV_ACCOUNT_ID) \
+		 federated-aws-rp.yaml \
+		 $(DEV_LAMBDA_CODE_STORAGE_S3_BUCKET_NAME) \
+		 $(FEDERATED_AWS_RP_STACK_NAME) \
+		 $(FEDERATED_AWS_RP_CODE_STORAGE_S3_PREFIX) \
+		 "ClientId=$(DEV_CLIENT_ID) \
+		 	DiscoveryUrl=$(DEV_DISCOVERY_URL) \
+		 	CustomDomainName=$(DEV_DOMAIN_NAME) \
+		 	DomainNameZone=$(DEV_DOMAIN_ZONE) \
+		 	CertificateArn=$(DEV_CERT_ARN) \
+		 	IdTokenForRolesUrl=$(DEV_ID_TOKEN_FOR_ROLE_URL)" \
+		 AwsFederatedRpUrl
+
+.PHONE: deploy-aws-federated-rp-dev-to-prod
+deploy-aws-federated-rp-dev-to-prod:
 	./deploy.sh \
 		 $(DEV_ACCOUNT_ID) \
 		 federated-aws-rp.yaml \
@@ -28,7 +46,7 @@ deploy-aws-federated-rp-dev:
 		 	CustomDomainName=$(DEV_DOMAIN_NAME) \
 		 	DomainNameZone=$(DEV_DOMAIN_ZONE) \
 		 	CertificateArn=$(DEV_CERT_ARN) \
-		 	IdTokenForRolesUrl=$(DEV_ID_TOKEN_FOR_ROLE_URL)" \
+		 	IdTokenForRolesUrl=$(PROD_ID_TOKEN_FOR_ROLE_URL)" \
 		 AwsFederatedRpUrl
 
 .PHONE: deploy-aws-federated-rp

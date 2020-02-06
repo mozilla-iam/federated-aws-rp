@@ -1,190 +1,159 @@
-import os
+import base64
 import hashlib
+import json
 import logging
+import mimetypes
+import os
+import time
 import traceback
 import urllib.parse
 from typing import Optional
-
-from jose import jwt
 
 from .config import CONFIG
 from .utils import (
     AccessDenied,
     base64_without_padding,
-    get_store,
-    get_discovery_document,
-    get_destination_url,
-    get_role_arn,
+    convert_account_alias,
     encode_cookie_value,
-    exchange_code_for_token,
-    exchange_token_for_roles,
-    redirect_to_web_console,
-    trigger_group_role_map_rebuild
+    get_aws_federation_url,
+    get_destination_url,
+    get_discovery_document,
+    get_role_arn,
+    get_roles,
+    get_store,
+    login,
+    read_resource,
+    return_api_gateway_json,
+    trigger_group_role_map_rebuild,
 )
 
 logger = logging.getLogger()
 logging.getLogger().setLevel(CONFIG.log_level)
+formatter = logging.Formatter(
+    '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] '
+    '%(message)s',
+    '%Y-%m-%d:%H:%M:%S')
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
 logging.getLogger('boto3').propagate = False
 logging.getLogger('botocore').propagate = False
 logging.getLogger('urllib3').propagate = False
 
 
-# /pick_role
-def pick_role(cookie_header: str, role_arn: str) -> dict:
-    """API Gateway /pick_role endpoint which the user goes to when they've
-    selected an AWS IAM Role from the role picker web page
+# POST /api/roles
+def pick_role(store: dict) -> dict:
+    """Exchange a role_arn for a AWS federation URL
 
-    :param cookie_header: Content of the "Cookie" HTTP header
-    :param role_arn: The AWS IAM Role ARN selected from the role picker
+    Get an AWS federation URL and store it in the client_workflow_value key of
+    the cookie store
+
+    :param store: The cookie store
     :return: An AWS API Gateway output dictionary for proxy mode
     """
-    global discovery_document
-    if 'discovery_document' not in globals():
-        logger.debug('Fetching discovery document')
-        discovery_document = get_discovery_document(CONFIG.discovery_url)
+    discovery_document = get_discovery_document()
+    try:
+        aws_federation_url = get_aws_federation_url(
+            discovery_document['jwks'],
+            store)
+        store['client_workflow_state'] = 'aws_federate'
+        store['client_workflow_value'] = {
+            'awsFederationUrl': aws_federation_url}
+    except AccessDenied as e:
+        logger.error("Access denied : {}".format(e))
+        store['client_workflow_state'] = 'error'
+        store['client_workflow_value'] = 'Access denied'
 
+    return return_api_gateway_json(store)
+
+
+# /redirect_callback
+def handle_oidc_redirect_callback(cookie_header: str, body: dict) -> dict:
+    """Get and ID token and store it in a cookie
+
+    Exchange an OIDC code with the identity provider for an ID token.
+
+    If the "action" query parameter was unset or set to aws-web-console :
+        If the role_arn was passed as a query parameter in the initial call to
+        the federated RP, then continue on and log the user in using that role.
+
+        Otherwise, set the client_workflow_state to role_picker so the frontend
+        displays the role picker
+
+    If the initial "action" query parameter indicated to trigger a group role
+    map rebuild, do so.
+
+    :param cookie_header: String of the cookie HTTP header
+    :param body: dictionary of query parameters returned in the redirect from
+        the identity provider
+    :return: An AWS API Gateway output dictionary for proxy mode
+    """
+    discovery_document = get_discovery_document()
     store = get_store(cookie_header)
-    store['role_arn'] = role_arn
-    logger.debug('role_arn is {} of type {}'.format(role_arn, type(role_arn)))
     try:
-        return redirect_to_web_console(
-            discovery_document['jwks'],
-            store)
+        logger.debug('/redirect_callback called with body {}'.format(
+            json.dumps(body)))
+        store['id_token'] = login(
+            body.get('state'),
+            body.get('code'),
+            body.get('error'),
+            body.get('error_description'),
+            cookie_header
+        )
     except AccessDenied as e:
         logger.error("Access denied : {}".format(e))
-        return {
-            'statusCode': 403,
-            'headers': {'Content-Type': 'text/html'},
-            'body': 'Access denied'}
+        store['client_workflow_state'] = 'error'
+        store['client_workflow_value'] = 'Access denied'
+        return return_api_gateway_json(store)
 
-
-# /redirect_uri
-def login(state: str, code: str, cookie_header: str) -> dict:
-    """API Gateway /redirect_uri endpoint which the user is redirected to after
-    authenticating with the identity provider
-
-    :param state: "state" query parameter returned by the identity provider
-    :param code: "code" query parameter returned by the identity provider
-    :param cookie_header: HTTP header cookies sent by the user
-    :return: An AWS API Gateway output dictionary for proxy mode
-    """
-    global discovery_document
-    if 'discovery_document' not in globals():
-        logger.debug('Fetching discovery document')
-        discovery_document = get_discovery_document(CONFIG.discovery_url)
-
-    try:
-        if 'state' is None:
-            raise AccessDenied('"state" query parameter is missing"')
-        elif 'code' is None:
-            raise AccessDenied('"code" query parameter is missing')
-        store = get_store(cookie_header)
-        if store.get('state') != state:
-            raise AccessDenied('Invalid "state" query parameter passed')
-        elif 'code_verifier' not in store:
-            raise AccessDenied(
-                '"code_verifier" not found in cookie')
-    except AccessDenied as e:
-        logger.error("Access denied : {}".format(e))
-        return {
-            'statusCode': 403,
-            'headers': {'Content-Type': 'text/html'},
-            'body': 'Access denied'}
-    token = exchange_code_for_token(
-        store['code_verifier'],
-        discovery_document['token_endpoint'],
-        code)
-    jwt.decode(
-        token=token['id_token'],
-        key=discovery_document['jwks'],
-        audience=CONFIG.client_id)
-    store['id_token'] = token['id_token']
-    return store
-
-
-def login_to_web_console(store):
-    global discovery_document
-    if 'discovery_document' not in globals():
-        logger.debug('Fetching discovery document')
-        discovery_document = get_discovery_document(CONFIG.discovery_url)
-
-    if 'role_arn' in store:
-        return redirect_to_web_console(
-            discovery_document['jwks'],
-            store)
-    else:
-        # show role picker
+    logger.debug('Action is {}'.format(store.get('action')))
+    if store.get('action') == 'aws-web-console':
+        if 'role_arn' in store:
+            store['role_arn'] = convert_account_alias(
+                store['role_arn'], store['id_token'], store.get('cache', True))
+            return pick_role(store)
+        else:
+            # no role_arn passed, show role picker
+            store['client_workflow_state'] = 'role_picker'
+    elif store.get('action') == 'rebuild-group-role-map':
+        # This is how we output a message, even though it's not an error
+        store['client_workflow_state'] = 'error'
         try:
-            role_map = exchange_token_for_roles(
+            result = trigger_group_role_map_rebuild(
                 discovery_document['jwks'],
-                store['id_token'],
-                store.get('cache', True))
+                store['id_token'])
+            # TODO : do something with result
         except AccessDenied as e:
             logger.error("Access denied : {}".format(e))
-            return {
-                'statusCode': 403,
-                'headers': {'Content-Type': 'text/html'},
-                'body': 'Access denied'}
-        roles = {
-            "roles": []
-        }
-        for arn in role_map["roles"]:
-            account_id = arn.split(":")[4]
-            alias = role_map.get(
-                "aliases", {}).get(account_id, [account_id])[0]
-            name = arn.split(':')[5].split('/')[-1]
-
-            roles["roles"].append(
-                {
-                    "alias": alias,
-                    "arn": arn,
-                    "id": account_id,
-                    "name": name,
-                }
-            )
-
-        # Sort the list by role name
-        roles["roles"] = sorted(roles["roles"], key=lambda x: x['name'])
-        response = {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'text/html',
-                'Cache-Control': 'max-age=0',
-                'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600; SameSite=strict'.format(
-                    CONFIG.cookie_name,
-                    encode_cookie_value(store))
-            },
-            'body': CONFIG.role_picker_template.render(roles=roles["roles"])
-        }
-    return response
-
-
-def group_role_map_rebuild(store):
-    global discovery_document
-    if 'discovery_document' not in globals():
-        logger.debug('Fetching discovery document')
-        discovery_document = get_discovery_document(CONFIG.discovery_url)
-    try:
-        result = trigger_group_role_map_rebuild(
-            discovery_document['jwks'],
-            store['id_token'])
-    except AccessDenied as e:
-        logger.error("Access denied : {}".format(e))
-        return {
-            'statusCode': 403,
-            'headers': {'Content-Type': 'text/html'},
-            'body': 'Access denied'}
-    if 'error' in result:
-        body = result['error']
+            store['client_workflow_value'] = 'Access denied'
+        else:
+            store['client_workflow_value'] = 'Group Role Map rebuild initiated'
     else:
-        body = 'Success'
-    return {
-        'statusCode': 200,
-        'headers': {
-            'Content-Type': 'text/html',
-            'Cache-Control': 'max-age=0'
-        },
-        'body': body}
+        logger.error('Invalid action argument {}'.format(store.get('action')))
+        store['client_workflow_state'] = 'error'
+        store['client_workflow_value'] = 'Invalid action argument'
+
+    return return_api_gateway_json(store)
+
+
+# GET /api/state
+def get_state(store: dict) -> dict:
+    """Fetch the current client_workflow_state from the user's cookie and
+    return it
+
+    Pull the client_workflow_state value from the users cookie store and return
+    it to the frontend as the 'state' field
+
+    :param store: The contents of the cookie store
+    :return: An AWS API Gateway output dictionary for proxy mode
+    """
+    return return_api_gateway_json(
+        None,
+        {
+            'state': store.get('client_workflow_state'),
+            'value': store.get('client_workflow_value')
+        }
+    )
 
 
 # /
@@ -197,6 +166,17 @@ def redirect_to_idp(
     """API Gateway / endpoint which redirects the user to the identity
     provider
 
+    Generate a code_verifier and associated code_challenge. Generate an OIDC
+    state value. Store the code_verifier and statein the user's cookie store.
+
+    Optionally also store a destination_url to have AWS send the user to upon
+    session expiration.
+
+    Construct a redirect URL with the code_challenge and OIDC state.
+
+    Return the user a 302 redirect response to send them to the identity
+    provider
+
     :param action: What to do after authenticating to the identity provider
     :param destination_url: The URL to store in the cookie which will later
         be used to tell AWS what the "issuer URL" is that AWS should direct
@@ -206,22 +186,21 @@ def redirect_to_idp(
     :param cache: Whether or not to request a cached role list
     :return: An AWS API Gateway output dictionary for proxy mode
     """
-    global discovery_document
-    if 'discovery_document' not in globals():
-        # TODO : Am I doing this right with these globals?
-        logger.debug('Fetching discovery document')
-        discovery_document = get_discovery_document(CONFIG.discovery_url)
-
+    discovery_document = get_discovery_document()
     code_verifier = base64_without_padding(os.urandom(32))
     code_challenge = base64_without_padding(hashlib.sha256(
         code_verifier.encode()).digest())
-    state = base64_without_padding(os.urandom(32))
+    # We're using "1" as the prefixed number as the functionality that this
+    # value provides in mozilla-aws-cli isn't needed in federated-aws-rp
+    state = '1-{}'.format(base64_without_padding(os.urandom(32)))
     store = {
         'action': action,
-        'state': state,
+        'oidc_state': state,
         'code_verifier': code_verifier,
         'session_duration': session_duration,
-        'cache': cache
+        'cache': cache,
+        'client_workflow_state': None,
+        'client_workflow_value': None
     }
     if destination_url:
         store['destination_url'] = destination_url
@@ -244,16 +223,20 @@ def redirect_to_idp(
     redirect_url_tuple = auth_endpoint._replace(
         query=urllib.parse.urlencode(url_parameters))
     redirect_url = urllib.parse.urlunparse(redirect_url_tuple)
+    logger.debug(
+        'Redirecting the user to {} after setting the cookie store to '
+        '{}'.format(redirect_url, store))
     # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#api-gateway-simple-proxy-for-lambda-output-format
     response = {
         'statusCode': 302,
         'headers': {
             'Location': redirect_url,
+            'Content-Type': 'text/html',
             'Cache-Control': 'max-age=0',
-            'Set-Cookie': '{}={}; Secure; HttpOnly; Max-Age=3600'.format(
-                CONFIG.cookie_name,
-                encode_cookie_value(store)),
-            'Content-Type': 'text/html'
+            'Set-Cookie': (
+                '{}={}; Secure; SameSite=Lax; HttpOnly; Path=/; Max-Age=3600'.format(
+                    CONFIG.cookie_name,
+                    encode_cookie_value(store)))
         },
         'body': 'Redirecting to identity provider'
     }
@@ -263,20 +246,32 @@ def redirect_to_idp(
 def lambda_handler(event: dict, context: dict) -> dict:
     """Handler for all API Gateway requests
 
+    Based on the HTTP method and the URL path call the appropriate function
+
     :param event: AWS API Gateway input fields for AWS Lambda
     :param context: Lambda context about the invokation and environment
     :return: An AWS API Gateway output dictionary for proxy mode
     """
-    global discovery_document
-
+    # logger.debug('event is {}'.format(event))
     path = event.get('path')
-    logger.debug('event is {}'.format(event))
     headers = event['headers'] if event['headers'] is not None else {}
     cookie_header = headers.get('Cookie', '')
+    store = get_store(cookie_header)
     referer = headers.get('Referer', '')
+    method = event.get('httpMethod')
     query_string_parameters = (
         event['queryStringParameters']
         if event['queryStringParameters'] is not None else {})
+    logger.debug('{} "{}" and client_workflow_state read : {}'.format(
+        method, path, store.get('client_workflow_state')))
+    try:
+        decoded_body = base64.b64decode(event.get('body', ''))
+        parsed_body = json.loads(decoded_body)
+    except (json.JSONDecodeError, TypeError) as e:
+        parsed_body = {
+            "error": "Unable to parse POST data",
+            "body": event.get('body'),
+            "exception": str(e)}
     try:
         if path == '/':
             role_arn = get_role_arn(query_string_parameters)
@@ -294,24 +289,81 @@ def lambda_handler(event: dict, context: dict) -> dict:
                 session_duration,
                 cache)
         elif path == '/redirect_uri':
-            state = query_string_parameters.get('state')
-            code = query_string_parameters.get('code')
-            store = login(state, code, cookie_header)
-            logger.debug('Action is {}'.format(store.get('action')))
-            if store.get('action') == 'aws-web-console':
-                return login_to_web_console(store)
-            elif store.get('action') == 'rebuild-group-role-map':
-                return group_role_map_rebuild(store)
-        elif path == '/pick_role':
-            role_arn = query_string_parameters.get('role_arn')
-            return pick_role(cookie_header, role_arn)
-        else:
-            logger.debug(
-                'Path "{}" not found. Event is {}'.format(path, event))
+            store['client_workflow_state'] = 'redirecting'
+            body = read_resource('/index.html')
+
             return {
-                'headers': {'Content-Type': 'text/html'},
-                'statusCode': 404,
-                'body': 'Path not found'}
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'Set-Cookie': (
+                        '{}={}; Secure; HttpOnly; Path=/; Max-Age=3600; '
+                        'SameSite=strict'.format(
+                            CONFIG.cookie_name,
+                            encode_cookie_value(store)))
+                },
+                'body': body
+            }
+        elif path == '/redirect_callback' and method == 'POST':
+            return handle_oidc_redirect_callback(cookie_header, parsed_body)
+        elif path == '/api/roles':
+            if method == 'GET':
+                roles = get_roles(store['id_token'], store.get('cache', True))
+                store['client_workflow_state'] = 'awaiting_role'
+                return return_api_gateway_json(store, roles)
+            elif method == 'POST':
+                if 'error' in parsed_body or 'arn' not in parsed_body:
+                    logger.error(
+                        'Invalid data POSTed to /api/roles : {}'.format(
+                            parsed_body))
+                    return {
+                        'headers': {'Content-Type': 'text/html'},
+                        'statusCode': 403,
+                        'body': 'Invalid POST data'}
+
+                store['role_arn'] = parsed_body['arn']
+                return pick_role(store)
+            else:
+                return {
+                    'headers': {'Content-Type': 'text/html'},
+                    'statusCode': 405,
+                    'body': 'Method not allowed'}
+        elif path == '/api/state':
+            return get_state(store)
+        elif path == '/api/heartbeat':
+            # As we have no need for a heartbeat, we'll just respond indicating
+            # that it's running for ever
+            return return_api_gateway_json(store, {'result': 'running'})
+        elif path == '/shutdown':
+            store['client_workflow_state'] = 'finished'
+            return return_api_gateway_json(store)
+        else:
+            body = read_resource(path)
+            if body:
+                # static resource
+                mimetypes.types_map.update({
+                    '.woff': 'application/octet-stream',
+                    '.woff2': 'application/octet-stream'
+                })
+                content_type = mimetypes.guess_type(path)[0]
+                # If the body is binary (bytes) we'll need to base64 encode it
+                # before sending it to API Gateway. We also need to set
+                # isBase64Encoded to True so API Gateway knows it's encoded.
+                is_base64_encoded = type(body) == bytes
+                return {
+                    'headers': {'Content-Type': content_type},
+                    'statusCode': 200,
+                    'isBase64Encoded': is_base64_encoded,
+                    'body': (base64.b64encode(body) if is_base64_encoded
+                             else body)}
+            else:
+                # 404
+                logger.debug(
+                    'Path "{}" not found.'.format(path))
+                return {
+                    'headers': {'Content-Type': 'text/html'},
+                    'statusCode': 404,
+                    'body': 'Not Found'}
     except Exception as e:
         logger.error(str(e))
         logger.error(traceback.format_exc())
