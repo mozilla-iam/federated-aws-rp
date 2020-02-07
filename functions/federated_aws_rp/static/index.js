@@ -25,7 +25,9 @@ const selectRole = async (e) => {
     await fetch("/api/roles", {
         method: "POST",
         body: JSON.stringify({
+            alias: e.target.dataset.alias,
             arn: e.target.dataset.arn,
+            role: e.target.dataset.role,
         }),
         headers: {
             "Content-Type": "application/json",

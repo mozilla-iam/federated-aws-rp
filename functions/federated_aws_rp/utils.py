@@ -355,8 +355,8 @@ def get_aws_federation_url(
         store['role_arn'],
         store['session_duration'])
     issuer_url_query = urllib.parse.urlencode({
-        "account": store['role_arn'].split(':')[4],
-        "role": store['role_arn'].split(':')[5].split('/')[-1]
+        "account": store['role_account_alias'],
+        "role": store['role_name']
     })
     issuer_url = urllib.parse.urlunparse(
         ('https', CONFIG.domain_name, '/', '', issuer_url_query, ''))
