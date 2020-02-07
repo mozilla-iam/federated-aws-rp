@@ -323,9 +323,11 @@ def lambda_handler(event: dict, context: dict) -> dict:
                         'statusCode': 403,
                         'body': 'Invalid POST data'}
 
-                store['role_arn'] = parsed_body['arn']
-                store['role_account_alias'] = parsed_body['alias']
-                store['role_name'] = parsed_body['role']
+                store.update({
+                    'role_account_alias': parsed_body['alias'],
+                    'role_arn': parsed_body['arn'],
+                    'role_name': parsed_body['role']
+                })
                 return pick_role(store)
             else:
                 return {
