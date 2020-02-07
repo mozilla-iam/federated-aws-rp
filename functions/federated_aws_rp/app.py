@@ -159,8 +159,7 @@ def get_state(store: dict) -> dict:
 # /
 def redirect_to_idp(
         action: str,
-        destination_url: Optional[str] = None,
-        role_arn: Optional[str] = None,
+        stored_vars: Optional[dict] = None,
         session_duration: Optional[int] = None,
         cache: bool = True) -> dict:
     """API Gateway / endpoint which redirects the user to the identity
@@ -178,10 +177,7 @@ def redirect_to_idp(
     provider
 
     :param action: What to do after authenticating to the identity provider
-    :param destination_url: The URL to store in the cookie which will later
-        be used to tell AWS what the "issuer URL" is that AWS should direct
-        the user to when their session expires to have their session refreshed
-    :param role_arn: An optional AWS IAM Role ARN
+    :param stored_vars: Additional values to store in the user's cookie
     :param session_duration: AN optional session duration in seconds
     :param cache: Whether or not to request a cached role list
     :return: An AWS API Gateway output dictionary for proxy mode
@@ -202,10 +198,8 @@ def redirect_to_idp(
         'client_workflow_state': None,
         'client_workflow_value': None
     }
-    if destination_url:
-        store['destination_url'] = destination_url
-    if role_arn:
-        store['role_arn'] = role_arn
+    if stored_vars:
+        store.update(stored_vars)
 
     url_parameters = {
         "scope": CONFIG.oidc_scope,
@@ -274,18 +268,26 @@ def lambda_handler(event: dict, context: dict) -> dict:
             "exception": str(e)}
     try:
         if path == '/':
+            stored_vars = {
+                'destination_url': get_destination_url(referer)
+            }
             role_arn = get_role_arn(query_string_parameters)
+            if role_arn is not None:
+                stored_vars['role_arn'] = role_arn
+            if query_string_parameters.get('role') is not None:
+                stored_vars['role_name'] = query_string_parameters['role']
+            if query_string_parameters.get('account') is not None:
+                stored_vars['role_account_alias'] = query_string_parameters['account']
+
             session_duration = int(query_string_parameters.get(
                 'session_duration', CONFIG.default_session_duration))
             action = query_string_parameters.get(
                 'action', 'aws-web-console')
-            destination_url = get_destination_url(referer)
             cache = query_string_parameters.get(
                 'cache', 'true').lower() == 'true'
             return redirect_to_idp(
                 action,
-                destination_url,
-                role_arn,
+                stored_vars,
                 session_duration,
                 cache)
         elif path == '/redirect_uri':
@@ -322,6 +324,8 @@ def lambda_handler(event: dict, context: dict) -> dict:
                         'body': 'Invalid POST data'}
 
                 store['role_arn'] = parsed_body['arn']
+                store['role_account_alias'] = parsed_body['alias']
+                store['role_name'] = parsed_body['role']
                 return pick_role(store)
             else:
                 return {

@@ -26,6 +26,8 @@ const selectRole = async (e) => {
         method: "POST",
         body: JSON.stringify({
             arn: e.target.dataset.arn,
+            role: e.target.dataset.role,
+            alias: e.target.dataset.alias
         }),
         headers: {
             "Content-Type": "application/json",

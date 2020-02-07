@@ -28,7 +28,7 @@
       <strong>{{@key}}</strong>
       <ul>
           {{#each this}}
-              <li><a data-arn="{{arn}}" data-role="{{role}}" href="#{{arn}}" title="{{id}}">{{role}}</a></li>
+              <li><a data-arn="{{arn}}" data-role="{{role}}" data-alias="{{@../key}}" href="#{{arn}}" title="{{id}}">{{role}}</a></li>
           {{/each}}
       </ul>
       {{/each}}
