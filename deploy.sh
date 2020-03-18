@@ -36,6 +36,16 @@ elif ! echo "$result" | grep "$ACCOUNT_ID" >/dev/null; then
 fi
 set -e
 
+# Use gmktemp and gln if they exist – this solves problems on platforms like
+# macOS, which don't have compatible mktemp and ln, but which are easily
+# installable via `brew install coreutils`
+if command -v gmktemp; then
+  mktemp() { command gmktemp "$@"; }
+  ln() { command gln "$@"; }
+  rm() { command grm "$@"; }
+  cp() { command gcp "$@"; }
+fi
+
 # This tempfile is required because of https://github.com/aws/aws-cli/issues/2504
 TMPFILE=$(mktemp --suffix .yaml)
 TMPDIR=$(mktemp --directory)

@@ -542,7 +542,7 @@ def return_api_gateway_json(
             'Content-Type': ['application/json'],
             'Cache-Control': ['max-age=0']
         },
-        'body': json.dumps(body)
+        'body': json.dumps(body, sort_keys=True)
     }
     if store is not None:
         result['multiValueHeaders']['Set-Cookie'] = [
