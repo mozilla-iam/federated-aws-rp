@@ -435,8 +435,8 @@ def get_roles(id_token: str, cache: bool) -> dict:
     roles = {}  # type: dict
     for arn in role_map["roles"]:
         account_id = arn.split(":")[4]
-        alias = role_map.get(
-            "aliases", {}).get(account_id, [account_id])[0]
+        record = role_map.get("aliases", {}).get(account_id)
+        alias = record[0] if record else account_id
         name = arn.split(':')[5].split('/')[-1]
         role = {
             "alias": alias,
