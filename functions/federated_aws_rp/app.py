@@ -62,7 +62,7 @@ def pick_role(store: dict) -> dict:
     except AccessDenied as e:
         logger.error("Access denied : {}".format(e))
         store['client_workflow_state'] = 'error'
-        store['client_workflow_value'] = 'Access denied'
+        store['client_workflow_value'] = {'message': 'Access denied'}
 
     return return_api_gateway_json(store)
 
@@ -103,7 +103,7 @@ def handle_oidc_redirect_callback(cookie_header: str, body: dict) -> dict:
     except AccessDenied as e:
         logger.error("Access denied : {}".format(e))
         store['client_workflow_state'] = 'error'
-        store['client_workflow_value'] = 'Access denied'
+        store['client_workflow_value'] = {'message': 'Access denied'}
         return return_api_gateway_json(store)
 
     logger.debug('Action is {}'.format(store.get('action')))
@@ -125,13 +125,13 @@ def handle_oidc_redirect_callback(cookie_header: str, body: dict) -> dict:
             # TODO : do something with result
         except AccessDenied as e:
             logger.error("Access denied : {}".format(e))
-            store['client_workflow_value'] = 'Access denied'
+            store['client_workflow_value'] = {'message': 'Access denied'}
         else:
             store['client_workflow_value'] = 'Group Role Map rebuild initiated'
     else:
         logger.error('Invalid action argument {}'.format(store.get('action')))
         store['client_workflow_state'] = 'error'
-        store['client_workflow_value'] = 'Invalid action argument'
+        store['client_workflow_value'] = {'message': 'Invalid action argument'}
 
     return return_api_gateway_json(store)
 
