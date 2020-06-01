@@ -376,3 +376,6 @@ Outputs:
   AwsFederatedRpApiGatewayDomainNameRef:
     Description: Ref AwsFederatedRpApiGatewayDomainName
     Value: !Ref AwsFederatedRpApiGatewayDomainName
+  LogGroup:
+    Description: The AWS CloudWatch LogGroup name containing Lambda function logs
+    Value: !Ref AwsFederatedRpFunctionLogGroup
