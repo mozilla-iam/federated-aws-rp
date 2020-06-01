@@ -4,7 +4,6 @@ import json
 import logging
 import mimetypes
 import os
-import time
 import traceback
 import urllib.parse
 from typing import Optional
@@ -21,6 +20,7 @@ from .utils import (
     get_role_arn,
     get_roles,
     get_store,
+    get_email_or_username,
     login,
     read_resource,
     return_api_gateway_json,
@@ -68,7 +68,7 @@ def pick_role(store: dict) -> dict:
 
 
 # /redirect_callback
-def handle_oidc_redirect_callback(cookie_header: str, body: dict) -> dict:
+def handle_oidc_redirect_callback(cookie_header: str, body: dict, source_ip: str) -> dict:
     """Get and ID token and store it in a cookie
 
     Exchange an OIDC code with the identity provider for an ID token.
@@ -86,6 +86,8 @@ def handle_oidc_redirect_callback(cookie_header: str, body: dict) -> dict:
     :param cookie_header: String of the cookie HTTP header
     :param body: dictionary of query parameters returned in the redirect from
         the identity provider
+    :param source_ip: The IP address of the client calling CloudFront -> API
+        Gateway -> Lambda
     :return: An AWS API Gateway output dictionary for proxy mode
     """
     discovery_document = get_discovery_document()
@@ -111,13 +113,19 @@ def handle_oidc_redirect_callback(cookie_header: str, body: dict) -> dict:
         if 'role_arn' in store:
             store['role_arn'] = convert_account_alias(
                 store['role_arn'], store['id_token'], store.get('cache', True))
-            return pick_role(store)
+            result = pick_role(store)
+            logger.info('Role {} assumed by {} from IP {}'.format(
+                store['role_arn'],
+                get_email_or_username(discovery_document['jwks'], store['id_token']),
+                source_ip))
+            return result
         else:
             # no role_arn passed, show role picker
             store['client_workflow_state'] = 'role_picker'
     elif store.get('action') == 'rebuild-group-role-map':
         # This is how we output a message, even though it's not an error
-        store['client_workflow_state'] = 'error'
+        store['client_workflow_state'] = 'info'
+        store['client_workflow_value'] = {'message': 'Processing rebuild...'}
         try:
             result = trigger_group_role_map_rebuild(
                 discovery_document['jwks'],
@@ -125,9 +133,14 @@ def handle_oidc_redirect_callback(cookie_header: str, body: dict) -> dict:
             # TODO : do something with result
         except AccessDenied as e:
             logger.error("Access denied : {}".format(e))
+            store['client_workflow_state'] = 'error'
             store['client_workflow_value'] = {'message': 'Access denied'}
         else:
-            store['client_workflow_value'] = 'Group Role Map rebuild initiated'
+            logger.info('Group role map rebuild initiated by {} from IP {}'.format(
+                get_email_or_username(discovery_document['jwks'], store['id_token']),
+                source_ip))
+            store['client_workflow_state'] = 'info'
+            store['client_workflow_value'] = {'message': 'Group Role Map rebuild initiated'}
     else:
         logger.error('Invalid action argument {}'.format(store.get('action')))
         store['client_workflow_state'] = 'error'
@@ -249,6 +262,7 @@ def lambda_handler(event: dict, context: dict) -> dict:
     # logger.debug('event is {}'.format(event))
     path = event.get('path')
     headers = event['headers'] if event['headers'] is not None else {}
+    source_ip = headers.get('X-Forwarded-For', 'unknown').split(',')[0]
     cookie_header = headers.get('Cookie', '')
     store = get_store(cookie_header)
     referer = headers.get('Referer', '')
@@ -256,8 +270,9 @@ def lambda_handler(event: dict, context: dict) -> dict:
     query_string_parameters = (
         event['queryStringParameters']
         if event['queryStringParameters'] is not None else {})
-    logger.debug('{} "{}" and client_workflow_state read : {}'.format(
-        method, path, store.get('client_workflow_state')))
+    discovery_document = get_discovery_document()
+    logger.debug('{} "{}" and client_workflow state and value read : {} "{}"'.format(
+        method, path, store.get('client_workflow_state'), store.get('client_workflow_value')))
     try:
         decoded_body = base64.b64decode(event.get('body', ''))
         parsed_body = json.loads(decoded_body)
@@ -307,7 +322,7 @@ def lambda_handler(event: dict, context: dict) -> dict:
                 'body': body
             }
         elif path == '/redirect_callback' and method == 'POST':
-            return handle_oidc_redirect_callback(cookie_header, parsed_body)
+            return handle_oidc_redirect_callback(cookie_header, parsed_body, source_ip)
         elif path == '/api/roles':
             if method == 'GET':
                 roles = get_roles(store['id_token'], store.get('cache', True))
@@ -328,7 +343,12 @@ def lambda_handler(event: dict, context: dict) -> dict:
                     'role_arn': parsed_body['arn'],
                     'role_name': parsed_body['role']
                 })
-                return pick_role(store)
+                result = pick_role(store)
+                logger.info('Role {} assumed by {} from IP {}'.format(
+                    store['role_arn'],
+                    get_email_or_username(discovery_document['jwks'], store.get('id_token')),
+                    source_ip))
+                return result
             else:
                 return {
                     'headers': {'Content-Type': 'text/html'},

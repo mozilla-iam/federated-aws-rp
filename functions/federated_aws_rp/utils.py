@@ -40,6 +40,36 @@ def encode_cookie_value(value: dict) -> str:
         json.dumps(value, separators=(',', ':')))[1]
 
 
+def decode_token(jwks: str, id_token: str) -> dict:
+    """Verify and decode an ID token
+
+    :param jwks: The JSON Web Key Set for the identity provider
+    :param id_token: An encoded OIDC ID token
+    :return: The verified content of the id_token in a dictionary
+    """
+    try:
+        return jwt.decode(
+            token=id_token,
+            key=jwks,
+            audience=CONFIG.client_id)
+    except Exception as e:
+        raise AccessDenied("Unable to parse ID token : {}".format(e))
+
+
+def get_email_or_username(jwks: str, id_token: str) -> str:
+    """Given an ID token verify it and return the user's email or username
+
+    :param jwks: The JSON Web Key Set for the identity provider
+    :param id_token: An encoded OIDC ID token
+    :return: A user email or username string
+    """
+    id_token_dict = decode_token(jwks, id_token)
+    return (
+        id_token_dict['email']
+        if 'email' in id_token_dict
+        else id_token_dict['sub'].split('|')[-1])
+
+
 def get_store(cookie_header: str) -> dict:
     """Given an HTTP cookie header return the store
 
@@ -194,7 +224,8 @@ def trigger_group_role_map_rebuild(jwks: str, id_token: str) -> dict:
 
     if 'error' in result.json():
         raise AccessDenied(result.json()['error'])
-
+    logger.info('Group Role Map rebuild triggered. Response : {}'.format(
+        result.json()))
     return result.json()
 
 
@@ -215,17 +246,7 @@ def get_api_keys(
     :param session_duration: AN optional session duration in seconds
     :return: A dictionary containing the AWS API keys and session information
     """
-    try:
-        id_token_dict = jwt.decode(
-            token=id_token,
-            key=jwks,
-            audience=CONFIG.client_id)
-    except Exception as e:
-        raise AccessDenied("Unable to parse ID token : {}".format(e))
-    role_session_name = (
-        id_token_dict['email']
-        if 'email' in id_token_dict
-        else id_token_dict['sub'].split('|')[-1])
+    role_session_name = get_email_or_username(jwks, id_token)
 
     # Call the STS API
     try:
@@ -408,10 +429,7 @@ def login(
     if 'id_token' not in token:
         raise AccessDenied('Bad response from token endpoint : {}'.format(
             token))
-    jwt.decode(
-        token=token['id_token'],
-        key=discovery_document['jwks'],
-        audience=CONFIG.client_id)
+    decode_token(discovery_document['jwks'], token['id_token'])
 
     return token['id_token']
 
