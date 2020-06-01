@@ -20,6 +20,10 @@ Metadata:
         default: Services
       Parameters:
       - IdTokenForRolesUrl
+    - Label:
+        default: Other Settings
+      Parameters:
+      - LogLevel
     ParameterLabels:
       ClientId:
         default: Client ID issued by the identity provider
@@ -33,6 +37,8 @@ Metadata:
         default: AWS ACM Certificate ARN for the Custom DNS Domain Name
       IdTokenForRolesUrl:
         default: The URL of the ID Token for Roles API
+      LogLevel:
+        default: The Python log level to use
 Parameters:
   ClientId:
     Type: String
@@ -60,6 +66,10 @@ Parameters:
   IdTokenForRolesUrl:
     Type: String
     Description: The URL of the ID Token for Roles API
+  LogLevel:
+    Type: String
+    Description: The Python log level to use
+    Default: INFO
 Conditions:
   UseCustomDomainName: !Not [ !Equals [ !Ref 'CustomDomainName', '' ] ]
 Rules:
@@ -111,7 +121,7 @@ Resources:
           CLIENT_ID: !Ref ClientId
           DISCOVERY_URL: !Ref DiscoveryUrl
           DOMAIN_NAME: !Ref CustomDomainName  # What if a domain name isn't provided?
-          LOG_LEVEL: INFO
+          LOG_LEVEL: !Ref LogLevel
           ID_TOKEN_FOR_ROLES_URL: !Ref IdTokenForRolesUrl
       Handler: federated_aws_rp.app.lambda_handler
       Runtime: python3.8
