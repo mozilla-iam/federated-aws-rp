@@ -70,6 +70,20 @@ test-aws-federated-rp:
 	URL=`aws cloudformation describe-stacks --stack-name $(FEDERATED_AWS_RP_STACK_NAME) --query "Stacks[0].Outputs[?OutputKey=='AliasesEndpointUrl'].OutputValue" --output text` && \
 	curl $$URL
 
+.PHONE: get-log-group-dev
+get-log-group-dev:
+	@test "`aws sts get-caller-identity --query Account --output text`" != "$(DEV_ACCOUNT_ID)" -o \
+		"`python -c 'import boto3; print(boto3.Session().region_name)'`" != "us-east-1" && \
+		echo "Wrong account or region" || \
+	aws cloudformation describe-stacks --stack-name $(FEDERATED_AWS_RP_STACK_NAME) --query "Stacks[0].Outputs[?OutputKey=='LogGroup'].OutputValue" --output text
+
+.PHONE: get-log-group
+get-log-group:
+	@test "`aws sts get-caller-identity --query Account --output text`" != "$(PROD_ACCOUNT_ID)" -o \
+		"`python -c 'import boto3; print(boto3.Session().region_name)'`" != "us-east-1" && \
+		echo "Wrong account or region" || \
+	aws cloudformation describe-stacks --stack-name $(FEDERATED_AWS_RP_STACK_NAME) --query "Stacks[0].Outputs[?OutputKey=='LogGroup'].OutputValue" --output text
+
 # TODO : Deal with the fact that this API isn't "deployed" when you first create the CloudFormation stack
 # options : https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apigateway-deployment.html
 # https://docs.aws.amazon.com/cli/latest/reference/apigateway/create-deployment.html
