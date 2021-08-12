@@ -25,7 +25,7 @@
 
     <script id="role-picker-template" type="text-/x-handlebars-template">
       {{#each accounts}}
-      <strong>{{@key}}</strong>
+      <strong>{{@key}}</strong> ({{this.[0].id}})
       <ul>
           {{#each this}}
               <li><a data-arn="{{arn}}" data-role="{{role}}" data-alias="{{@../key}}" href="#{{arn}}" title="{{id}}">{{role}}</a></li>
