@@ -52,3 +52,12 @@ Run `make deploy-aws-federated-rp` to package up the [functions](https://github.
 and the [CloudFormation template](https://github.com/mozilla-iam/federated-aws-rp/blob/master/federated-aws-rp.yaml)
 and deploy the stack into AWS using CloudFormation
 
+# Mozilla's Deployment
+
+The dev instance of the Federated AWS RP is deployed in the `infosec-dev` AWS
+account in `us-east-1` in the `FederatedAWSRP` CloudFormation stack and can
+be accessed at https://aws.security.allizom.org/ . This dev instance talks to
+the production Auth0 identity provider
+
+The prod instance is deployed in the `mozilla-iam` AWS account in `us-east-1` in
+the `FederatedAWSRP` CloudFormation stack and can be accessed at https://aws.sso.mozilla.com/
